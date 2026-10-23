@@ -15,7 +15,8 @@ import {
   pickRoundRobinAccount,
   selectPriorityTier,
 } from "../pool-rotation";
-import { CODEX_UNKNOWN_USAGE_SCORE, getAccountQuota, resetAtToMs } from "../quota";
+import { quotaPaceReading } from "../quota-pace";
+import { CODEX_UNKNOWN_USAGE_SCORE, getAccountQuota, resetAtToMs, codexQuotaWindowForPlan } from "../quota";
 import { codexPlanKey } from "../plan";
 import { MAIN_CODEX_ACCOUNT_ID, getMainAccountPlan } from "../main-account";
 import type { OcxConfig } from "../../types";
@@ -267,7 +268,7 @@ function listEligibleCodexAccountIds(
 /** Shared reset timestamps are not evidence for independent model-quota groups. */
 export function accountPoolStrategyForScope(config: OcxConfig, quotaScope?: CodexQuotaScope) {
   const strategy = normalizeCodexAccountPoolStrategy(config.accountPoolStrategy);
-  return strategy === "reset-first" && isIndependentCodexQuotaScope(quotaScope) ? "quota" : strategy;
+  return (strategy === "reset-first" || strategy === "quota-pace") && isIndependentCodexQuotaScope(quotaScope) ? "quota" : strategy;
 }
 
 function stickyLimitForConfig(config: OcxConfig): number {
@@ -351,6 +352,28 @@ export function hasCodexSharedStateQuotaHeadroom(
     codexAccountUsesCreditsAfterLimit(config, accountId),
   );
   return isUnknownUsage(usage) || usage < 100;
+}
+
+/** Keep cross-plan selection on the existing quota policy; pace only comparable subscriptions. */
+export function pickQuotaPaceCodexAccount(config: OcxConfig, ids: readonly string[], now: number,
+  options?: CodexAccountUsabilityOptions): string | null {
+  const available = ids.filter(id => hasCodexQuotaHeadroom(config, id, options, now));
+  const baseline = pickLowestUsageAmong(config, available.length ? available : ids, options, now);
+  if (!baseline) return null;
+  const plan = codexPlanKey(getPoolAccountPlanForSelection(config, baseline, options));
+  if (!plan) return baseline;
+  const reading = quotaPaceReading(getAccountQuota(baseline), codexQuotaWindowForPlan(plan) === "monthly", now);
+  if (!reading) return baseline;
+  let best = baseline;
+  let score = reading.remainingPerHour;
+  for (const id of available) {
+    if (codexPlanKey(getPoolAccountPlanForSelection(config, id, options)) !== plan) continue;
+    const next = quotaPaceReading(getAccountQuota(id), reading.window === "monthly", now);
+    if (next && next.window === reading.window && next.remainingPerHour > score) {
+      best = id; score = next.remainingPerHour;
+    }
+  }
+  return best;
 }
 
 /** Earliest future shared short/weekly reset; missing evidence and ties use usage order. */
@@ -493,8 +516,10 @@ export function pickUnboundStrategyAccount(
     return picked;
   }
 
-  if (strategy === "fill-first" || strategy === "reset-first") {
-    picked = strategy === "reset-first"
+  if (strategy === "fill-first" || strategy === "reset-first" || strategy === "quota-pace") {
+    picked = strategy === "quota-pace"
+      ? pickQuotaPaceCodexAccount(config, listEligibleCodexAccountIds(config, now, quotaScope, selectionOptions), now, selectionOptions)
+      : strategy === "reset-first"
       ? pickResetFirstCodexAccount(config, listEligibleCodexAccountIds(config, now, quotaScope, selectionOptions), now, selectionOptions)
       : pickFillFirstCodexAccount(config, now, quotaScope, selectionOptions);
     if (!picked) return null;
@@ -666,6 +691,9 @@ export function pickAlternateCodexAccount(
   if (strategy === "fill-first") {
     const eligible = getEligiblePoolAccounts(config, excludeId, now, quotaScope, selectionOptions);
     return pickNextFillFirstCodexAccount(config, excludeId, eligible, now, selectionOptions);
+  }
+  if (strategy === "quota-pace") {
+    return pickQuotaPaceCodexAccount(config, getEligiblePoolAccounts(config, excludeId, now, quotaScope, selectionOptions), now, selectionOptions);
   }
   if (strategy === "reset-first") {
     return pickResetFirstCodexAccount(config, getEligiblePoolAccounts(config, excludeId, now, quotaScope, selectionOptions), now, selectionOptions);

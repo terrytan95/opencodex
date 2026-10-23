@@ -6,6 +6,17 @@ import type { TKey } from "./en";
  * Russian i18n catalog; must match the `TKey` set (compile-checked).
  */
 export const ru: Record<TKey, string> = {
+  "accountPool.strategyPace": "Темп квоты",
+  "accountPool.strategyHintPace": "Использовать остаток до сброса в рамках одного плана.",
+  "accountPool.paceNewSessions": "Текущие сеансы сохраняют аккаунт",
+  "pace.title": "Темп квоты",
+  "pace.remaining": "{rate}% в час до сброса",
+  "pace.fast": "Расход выше темпа оставшейся квоты",
+  "pace.slow": "К моменту сброса квота может остаться",
+  "pace.balanced": "Расход близок к доступному темпу",
+  "pace.unknown": "Недостаточно свежих наблюдений",
+  "pace.failed": "История квоты недоступна",
+  "pace.samples": "{n} наблюдений",
   "context.title": "Контекст",
   "context.capture": "Запись контекста",
   "context.captureHint": "Остановка через 30 минут. Только счётчики, без текста запросов.",

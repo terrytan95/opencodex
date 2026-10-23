@@ -8,6 +8,17 @@ import type { TKey } from "./en";
  * Technical terms and model identifiers intentionally remain English.
  */
 export const pt: Record<TKey, string> = {
+  "accountPool.strategyPace": "Ritmo da cota",
+  "accountPool.strategyHintPace": "Use a cota antes da renovação, dentro do mesmo plano.",
+  "accountPool.paceNewSessions": "Sessões existentes mantêm a conta",
+  "pace.title": "Ritmo da cota",
+  "pace.remaining": "{rate}% por hora até renovar",
+  "pace.fast": "Uso mais rápido que a cota restante",
+  "pace.slow": "Pode sobrar cota na renovação",
+  "pace.balanced": "Uso próximo do ritmo disponível",
+  "pace.unknown": "Poucas observações recentes",
+  "pace.failed": "Histórico da cota indisponível",
+  "pace.samples": "{n} observações",
   "context.title": "Contexto",
   "context.capture": "Capturar contexto",
   "context.captureHint": "Para após 30 minutos. Guarda contagens, nunca o texto.",

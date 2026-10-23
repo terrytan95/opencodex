@@ -7,6 +7,17 @@ import type { TKey } from "./en";
  * Turkish i18n catalog. Must match the `TKey` set (compile-checked).
  */
 export const tr: Record<TKey, string> = {
+  "accountPool.strategyPace": "Kota temposu",
+  "accountPool.strategyHintPace": "Aynı plan içinde kalan kotayı sıfırlanmadan kullanın.",
+  "accountPool.paceNewSessions": "Mevcut oturumlar hesaplarını korur",
+  "pace.title": "Kota temposu",
+  "pace.remaining": "Sıfırlanana kadar saatte %{rate}",
+  "pace.fast": "Kalan kotaya göre kullanım hızlı",
+  "pace.slow": "Sıfırlamada kullanılmamış kota kalabilir",
+  "pace.balanced": "Kullanım mevcut tempoya yakın",
+  "pace.unknown": "Yeterli güncel gözlem yok",
+  "pace.failed": "Kota geçmişi kullanılamıyor",
+  "pace.samples": "{n} gözlem",
   "context.title": "Bağlam",
   "context.capture": "Bağlamı kaydet",
   "context.captureHint": "30 dakika sonra durur. Yalnızca sayılar tutulur, istem metni tutulmaz.",

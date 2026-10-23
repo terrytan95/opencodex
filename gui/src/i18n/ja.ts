@@ -6,6 +6,17 @@ import type { TKey } from "./en";
  * Japanese i18n catalog; must match the `TKey` set (compile-checked).
  */
 export const ja: Record<TKey, string> = {
+  "accountPool.strategyPace": "クォータのペース",
+  "accountPool.strategyHintPace": "同じプランで、リセット前に余りそうな枠を優先。",
+  "accountPool.paceNewSessions": "既存セッションのアカウントは維持",
+  "pace.title": "クォータのペース",
+  "pace.remaining": "リセットまで毎時 {rate}%",
+  "pace.fast": "残り枠に対して使用が速めです",
+  "pace.slow": "リセット時に枠が余る可能性があります",
+  "pace.balanced": "使用ペースは残り枠に近い状態です",
+  "pace.unknown": "最近の観測が足りません",
+  "pace.failed": "クォータ履歴を取得できません",
+  "pace.samples": "{n} 件の観測",
   "context.title": "コンテキスト",
   "context.capture": "コンテキストを記録",
   "context.captureHint": "30分で停止。件数のみ保存し、本文は保存しません。",

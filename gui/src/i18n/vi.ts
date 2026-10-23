@@ -8,6 +8,17 @@ import type { TKey } from "./en";
  * Technical terms and model identifiers intentionally remain English.
  */
 export const vi: Record<TKey, string> = {
+  "accountPool.strategyPace": "Nhịp sử dụng hạn mức",
+  "accountPool.strategyHintPace": "Dùng phần hạn mức trước khi đặt lại, trong cùng gói.",
+  "accountPool.paceNewSessions": "Phiên hiện có giữ nguyên tài khoản",
+  "pace.title": "Nhịp sử dụng hạn mức",
+  "pace.remaining": "{rate}% mỗi giờ trước khi đặt lại",
+  "pace.fast": "Sử dụng nhanh hơn nhịp hạn mức còn lại",
+  "pace.slow": "Có thể còn hạn mức chưa dùng khi đặt lại",
+  "pace.balanced": "Sử dụng gần nhịp hạn mức khả dụng",
+  "pace.unknown": "Chưa đủ quan sát gần đây",
+  "pace.failed": "Không có lịch sử hạn mức",
+  "pace.samples": "{n} quan sát",
   "context.title": "Ngữ cảnh",
   "context.capture": "Ghi nhận ngữ cảnh",
   "context.captureHint": "Dừng sau 30 phút. Chỉ giữ số liệu, không giữ nội dung lời nhắc.",

@@ -8,6 +8,17 @@ import { desktopCompatibilityCopy } from "./desktop-compatibility-copy";
  * `{var}` are plain interpolations.
  */
 export const en = {
+  "accountPool.strategyPace": "Quota pace",
+  "accountPool.strategyHintPace": "Use remaining quota before it resets, within the same plan.",
+  "accountPool.paceNewSessions": "Existing sessions keep their account",
+  "pace.title": "Quota pace",
+  "pace.remaining": "{rate}% per hour until reset",
+  "pace.fast": "Using faster than the remaining allowance",
+  "pace.slow": "Allowance may remain unused at reset",
+  "pace.balanced": "Usage is close to the available pace",
+  "pace.unknown": "Not enough recent observations",
+  "pace.failed": "Quota history is unavailable",
+  "pace.samples": "{n} observations",
   "context.title": "Context",
   "context.capture": "Capture context",
   "context.captureHint": "Stops after 30 minutes. Keeps counts, never prompt text.",

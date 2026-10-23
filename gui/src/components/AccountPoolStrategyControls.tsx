@@ -9,6 +9,7 @@ import { Select } from "../ui";
 
 const STRATEGY_LABEL_KEYS = {
   "reset-first": "accountPool.strategyResetFirst",
+  "quota-pace": "accountPool.strategyPace",
   quota: "accountPool.strategyQuota",
   "round-robin": "accountPool.strategyRoundRobin",
   "fill-first": "accountPool.strategyFillFirst",
@@ -16,6 +17,7 @@ const STRATEGY_LABEL_KEYS = {
 
 const STRATEGY_HINT_KEYS = {
   "reset-first": "accountPool.strategyHintResetFirst",
+  "quota-pace": "accountPool.strategyHintPace",
   quota: "accountPool.strategyHintQuota",
   "round-robin": "accountPool.strategyHintRoundRobin",
   "fill-first": "accountPool.strategyHintFillFirst",
@@ -56,13 +58,14 @@ export default function AccountPoolStrategyControls({
   onStickyCommit,
 }: AccountPoolStrategyControlsProps) {
   const t = useT();
-  const strategyOptions = ACCOUNT_POOL_STRATEGIES.filter(value => codex || value !== "reset-first").map((value) => ({
+  const strategyOptions = ACCOUNT_POOL_STRATEGIES.filter(value => codex || (value !== "reset-first" && value !== "quota-pace")).map((value) => ({
     value,
     label: t(STRATEGY_LABEL_KEYS[value]),
   }));
 
   const thresholdSummary = (() => {
     if (threshold === undefined) return null;
+    if (strategy === "quota-pace") return t("accountPool.paceNewSessions");
     if (strategy === "round-robin") {
       return t("accountPool.thresholdNotUsed");
     }

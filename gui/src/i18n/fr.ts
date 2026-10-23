@@ -6,6 +6,17 @@ import type { TKey } from "./en";
  * French i18n catalog. Must match the `TKey` set.
  */
 export const fr: Record<TKey, string> = {
+  "accountPool.strategyPace": "Rythme du quota",
+  "accountPool.strategyHintPace": "Utiliser le quota avant sa remise à zéro, à forfait identique.",
+  "accountPool.paceNewSessions": "Les sessions existantes gardent leur compte",
+  "pace.title": "Rythme du quota",
+  "pace.remaining": "{rate}% par heure avant remise à zéro",
+  "pace.fast": "Consommation plus rapide que le quota restant",
+  "pace.slow": "Du quota risque de rester inutilisé",
+  "pace.balanced": "Consommation proche du rythme disponible",
+  "pace.unknown": "Pas assez d’observations récentes",
+  "pace.failed": "Historique du quota indisponible",
+  "pace.samples": "{n} observations",
   "context.title": "Contexte",
   "context.capture": "Capturer le contexte",
   "context.captureHint": "Arrêt après 30 minutes. Compteurs seuls, aucun texte de prompt.",

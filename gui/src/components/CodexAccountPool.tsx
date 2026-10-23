@@ -70,7 +70,7 @@ export default function CodexAccountPool({ apiBase, accountModeState = null, ban
     invalid: t("codexAuth.autoSwitchThresholdInvalid"),
   });
   const [poolStrategy, setPoolStrategy] = useState<
-    typeof DEFAULT_ACCOUNT_POOL_STRATEGY | "round-robin" | "fill-first" | "reset-first" | null
+    typeof DEFAULT_ACCOUNT_POOL_STRATEGY | "round-robin" | "fill-first" | "reset-first" | "quota-pace" | null
   >(null);
   const { beginServerRead, acceptServerRead, rejectServerRead, hydrateServerValue } = autoSwitch;
   // A hook cannot be called conditionally, so the fallback instance is always created
@@ -601,6 +601,7 @@ export default function CodexAccountPool({ apiBase, accountModeState = null, ban
           {pool.length === 0 && <EmptyState title={t("codexAuth.noPool")} />}
 
           <CodexAccountPoolCards
+            apiBase={apiBase}
             pool={pool}
             creditsVisible={credits.visible}
             loading={loadState === "loading"}

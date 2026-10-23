@@ -4,6 +4,17 @@ import type { TKey } from "./en";
 
 /** Traditional Chinese (Taiwan) UI strings — keys must match `en.ts` 1:1. */
 export const zhTW: Record<TKey, string> = {
+  "accountPool.strategyPace": "額度節奏",
+  "accountPool.strategyHintPace": "同方案內，優先使用重設前較容易閒置的額度。",
+  "accountPool.paceNewSessions": "現有對話保留原帳戶",
+  "pace.title": "額度節奏",
+  "pace.remaining": "重設前每小時可用 {rate}%",
+  "pace.fast": "目前消耗快於剩餘額度節奏",
+  "pace.slow": "重設時可能有額度未使用",
+  "pace.balanced": "目前使用節奏接近可用額度",
+  "pace.unknown": "近期觀測資料不足",
+  "pace.failed": "額度歷史暫不可用",
+  "pace.samples": "{n} 次觀測",
   "context.title": "上下文",
   "context.capture": "擷取上下文",
   "context.captureHint": "30 分鐘後停止。只保留統計，不儲存提示詞內文。",

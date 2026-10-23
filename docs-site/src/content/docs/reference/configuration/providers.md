@@ -1971,3 +1971,18 @@ log line without account identifiers or upstream error text.
 the reason and time. Use `ocx account resume <provider> <account-id-or-alias>` to clear the
 reason and allow selection again. On an API-key row, clicking Resume also activates the key.
 This policy never resumes an account automatically.
+
+
+### Codex quota pace
+
+Set `accountPoolStrategy` to `"quota-pace"`, or choose **Quota pace** in the Codex account-pool
+strategy control. It prefers remaining allowance per hour before reset among eligible accounts
+on the same plan, while retaining manual priorities and existing sessions. Unknown or stale
+readings use the existing quota ordering. Other providers do not support this option.
+
+Expand **Quota pace** under an account's quota bars for recent usage and a pace comparison.
+This view uses observed percentages, not a guaranteed token capacity or billing estimate.
+
+```sh
+ocx account strategy openai quota-pace
+```

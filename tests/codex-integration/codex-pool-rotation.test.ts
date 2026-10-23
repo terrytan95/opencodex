@@ -363,6 +363,40 @@ describe("accountPoolStrategy new-session routing", () => {
     if (existsSync(TEST_DIR)) removeTreeWithRetry(TEST_DIR);
   });
 
+  test("quota pace ranks within a plan and leaves bound sessions in place", () => {
+    const config = makeThreeAccountConfig({ accountPoolStrategy: "quota-pace" });
+    config.codexAccounts!.forEach(account => { account.plan = "plus"; });
+    const now = Date.now() + 1000;
+    setAccountQuotaFromParsed("a", { weeklyPercent: 50, weeklyResetAt: now + 2 * 3600_000 });
+    setAccountQuotaFromParsed("b", { weeklyPercent: 10, weeklyResetAt: now + 20 * 3600_000 });
+    setAccountQuotaFromParsed("c", { weeklyPercent: 30, weeklyResetAt: now + 30 * 3600_000 });
+    expect(parseCodexAccountPoolStrategy("quota-pace")).toBe("quota-pace");
+    expect(parseAccountPoolStrategy("quota-pace")).toBeNull();
+    expect(previewCodexAccountForRequest("paced", config, now)).toBe("a");
+    expect(resolveCodexAccountForThread("paced", config, now)).toBe("a");
+    expect(config.activeCodexAccountId).toBe("a");
+    setAccountQuotaFromParsed("a", { weeklyPercent: 90 });
+    expect(resolveCodexAccountForThread("paced", config, now + 1)).toBe("a");
+    expect(pickAlternateCodexAccount(config, "a", now + 1)).toBe("b");
+    expect(resolveCodexAccountForThread("independent-pace", config, now, "spark")).toBe("b");
+  });
+
+  test("quota pace never compares different plans or invents missing reset evidence", () => {
+    const config = makeThreeAccountConfig({ accountPoolStrategy: "quota-pace" });
+    config.codexAccounts!.forEach(account => { account.plan = account.id === "b" ? "pro" : "plus"; });
+    const now = Date.now() + 1000;
+    setAccountQuotaFromParsed("a", { weeklyPercent: 50, weeklyResetAt: now + 3600_000 });
+    setAccountQuotaFromParsed("b", { weeklyPercent: 10, weeklyResetAt: now + 20 * 3600_000 });
+    setAccountQuotaFromParsed("c", { weeklyPercent: 30, weeklyResetAt: now + 3600_000 });
+    expect(previewCodexAccountForRequest("mixed-plan", config, now)).toBe("b");
+    config.codexAccounts!.forEach(account => { account.plan = "plus"; });
+    clearAccountQuota();
+    setAccountQuotaFromParsed("a", { weeklyPercent: 50, weeklyResetAt: now + 3600_000 });
+    setAccountQuotaFromParsed("b", { weeklyPercent: 10 });
+    setAccountQuotaFromParsed("c", { weeklyPercent: 30 });
+    expect(previewCodexAccountForRequest("unknown-reset", config, now)).toBe("b");
+  });
+
   test("reset-first is accepted only by the Codex strategy parser", () => {
     expect(parseCodexAccountPoolStrategy("reset-first")).toBe("reset-first");
     expect(parseAccountPoolStrategy("reset-first")).toBeNull();

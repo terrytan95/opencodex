@@ -6,6 +6,17 @@ import type { TKey } from "./en";
  * Korean i18n catalog; must match the `TKey` set (compile-checked).
  */
 export const ko: Record<TKey, string> = {
+  "accountPool.strategyPace": "할당량 속도",
+  "accountPool.strategyHintPace": "같은 요금제에서 초기화 전에 남을 할당량을 우선 사용합니다.",
+  "accountPool.paceNewSessions": "기존 세션은 계정을 유지합니다",
+  "pace.title": "할당량 속도",
+  "pace.remaining": "초기화 전 시간당 {rate}%",
+  "pace.fast": "남은 할당량보다 빠르게 사용 중",
+  "pace.slow": "초기화 시 할당량이 남을 수 있음",
+  "pace.balanced": "사용 속도가 남은 할당량과 비슷함",
+  "pace.unknown": "최근 관측 데이터 부족",
+  "pace.failed": "할당량 기록을 사용할 수 없음",
+  "pace.samples": "관측 {n}회",
   "context.title": "컨텍스트",
   "context.capture": "컨텍스트 수집",
   "context.captureHint": "30분 후 중지됩니다. 통계만 보관하며 본문은 저장하지 않습니다.",

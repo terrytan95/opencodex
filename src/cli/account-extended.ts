@@ -48,7 +48,7 @@ const EXTENDED_USAGE = `Usage:
   ocx account pause <provider> <id|alias|main> [--json]
   ocx account resume <provider> <id|alias|main> [--json]
   ocx account pause-exhausted <provider> [--json]
-  ocx account strategy <provider> [<quota|round-robin|fill-first|least-loaded|reset-first>] [--json]
+  ocx account strategy <provider> [<quota|round-robin|fill-first|least-loaded|reset-first|quota-pace>] [--json]
   ocx account sticky <provider> [<1-100>] [--json]
   ocx account routes <anthropic|anthropic2> [--file <json-file>|--clear] [--json]
   ocx account remove <provider> <id|alias|main> --yes [--json]
@@ -1022,7 +1022,7 @@ async function poolSetting(
       console.log(JSON.stringify(payload, null, 2));
     } else {
       if (field === "strategy" && autoSwitchThreshold !== undefined) {
-        const thresholdSummary = strategy === "least-loaded"
+        const thresholdSummary = strategy === "quota-pace" ? "pace new sessions within the same plan" : strategy === "least-loaded"
           ? "fewest active requests"
           : strategy === "round-robin"
           ? "threshold not used"

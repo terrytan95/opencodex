@@ -7,6 +7,17 @@ import type { TKey } from "./en";
  * German i18n catalog, generated from en.ts. Must match the `TKey` set (compile-checked).
  */
 export const de: Record<TKey, string> = {
+  "accountPool.strategyPace": "Kontingenttempo",
+  "accountPool.strategyHintPace": "Restkontingent vor dem Reset nutzen, innerhalb desselben Tarifs.",
+  "accountPool.paceNewSessions": "Bestehende Sitzungen behalten ihr Konto",
+  "pace.title": "Kontingenttempo",
+  "pace.remaining": "{rate}% pro Stunde bis zum Reset",
+  "pace.fast": "Verbrauch schneller als das Restkontingent",
+  "pace.slow": "Beim Reset könnte Kontingent übrig bleiben",
+  "pace.balanced": "Verbrauch nahe am verfügbaren Tempo",
+  "pace.unknown": "Zu wenige aktuelle Beobachtungen",
+  "pace.failed": "Kontingentverlauf nicht verfügbar",
+  "pace.samples": "{n} Beobachtungen",
   "context.title": "Kontext",
   "context.capture": "Kontext erfassen",
   "context.captureHint": "Stoppt nach 30 Minuten. Nur Zähler, keine Prompt-Texte.",
