@@ -14,6 +14,7 @@ export type Page =
   | "storage"
   | "remote"
   | "remote-workspace"
+  | "antigravity"
   | "codex-set"
   | "integrations"
   | "claude";
@@ -31,6 +32,7 @@ export const VALID_PAGES = new Set<Page>([
   "remote",
   "remote-workspace",
   "codex-set",
+  "antigravity",
   "integrations",
   "claude",
 ]);

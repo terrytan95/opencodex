@@ -20,6 +20,7 @@ import { IconActivity, IconBot, IconBoxes, IconCodex, IconGrid, IconLink, IconMo
 export type NavGroupId =
   | "dashboard"
   | "connect"
+  | "antigravity"
   | "codex-set"
   | "providers"
   | "models"
@@ -39,6 +40,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   { id: "dashboard", tkey: "nav.dashboard", Icon: IconGrid, pages: ["dashboard"] },
   { id: "connect", tkey: "nav.connect", Icon: IconLink, pages: ["integrations"], embedded: ["claude"] },
   { id: "codex-set", tkey: "nav.codexSet", Icon: IconCodex, pages: ["codex-set"] },
+  { id: "antigravity", tkey: "nav.antigravity", Icon: IconBot, pages: ["antigravity"] },
   { id: "providers", tkey: "nav.providers", Icon: IconServer, pages: ["providers"] },
   { id: "models", tkey: "nav.models", Icon: IconBoxes, pages: ["models"] },
   // Advisor is another way a worker reaches a second model, so it sits beside Subagents

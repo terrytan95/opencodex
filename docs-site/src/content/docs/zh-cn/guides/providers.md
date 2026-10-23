@@ -577,3 +577,7 @@ opencodex 会以明确的错误拒绝结构化输出请求（`text.format`），
 ## 任意 OpenAI 兼容端点
 
 如果某个提供商使用 Chat Completions，`openai-chat` adapter 即可处理它——在仪表盘中选择 **Custom**，或在 `ocx init` 中选择 `custom` 并输入基础 URL。每个提供商字段（`headers`、`noReasoningModels`、`noVisionModels`、`models`……）请参见 [配置参考](/zh-cn/reference/configuration/)。
+
+### Antigravity 账号池入口
+
+左侧菜单的 **Antigravity** 位于 **Codex** 下方，直接打开 `#antigravity` 账号池。它与提供方页面使用同一组已登录账号，支持逐账号额度、刷新、切换、暂停／恢复、别名、删除、登录及 Cockpit 导入。打开页面不会切换当前账号。

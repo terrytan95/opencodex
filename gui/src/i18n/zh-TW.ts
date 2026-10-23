@@ -1770,6 +1770,7 @@ export const zhTW: Record<TKey, string> = {
   "modal.adding": "正在新增…",
   "modal.useOauthLogin": "← 使用 OAuth 登入",
 "nav.codexAuth": "Codex 認證",
+  "nav.antigravity": "Antigravity",
   "nav.codexSet": "Codex",
   "nav.connect": "連線",
   "nav.usageLogs": "用量與日誌",

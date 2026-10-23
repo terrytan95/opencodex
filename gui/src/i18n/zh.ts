@@ -1551,6 +1551,7 @@ export const zh: Record<TKey, string> = {
   "modal.loginTimeout": "登录超时 — 请重试。",
   "nav.api": "API",
 "nav.codexAuth": "Codex 认证",
+  "nav.antigravity": "Antigravity",
   "nav.codexSet": "Codex",
   "nav.connect": "连接",
   "nav.usageLogs": "用量与日志",

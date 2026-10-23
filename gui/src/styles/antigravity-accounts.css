@@ -1,0 +1,18 @@
+.antigravity-accounts .pwi-auth-section { border: 0; padding: 0; background: none; }
+.antigravity-accounts .pwi-auth-body { gap: var(--space-4); }
+.antigravity-accounts .pwi-auth-list { gap: var(--space-3); }
+.antigravity-accounts .pwi-auth-acct {
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  gap: var(--space-3);
+}
+.antigravity-accounts .pwi-auth-acct--active { border-color: var(--accent); }
+.antigravity-accounts .pwi-auth-row { flex-wrap: wrap; padding: 0; }
+.antigravity-accounts .pwi-auth-row-main { min-width: 0; flex-basis: 50%; }
+.antigravity-accounts .pwi-auth-acct-quota { padding: 0; }
+@media (max-width: 640px) {
+  .antigravity-accounts .pwi-auth-row-main { flex-basis: 100%; }
+  .antigravity-accounts .pwi-auth-row-secondary { white-space: normal; overflow-wrap: anywhere; }
+}

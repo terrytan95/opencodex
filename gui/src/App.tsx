@@ -8,6 +8,7 @@ const Subagents = lazy(() => import("./pages/Subagents"));
 const Logs = lazy(() => import("./pages/Logs"));
 const Usage = lazy(() => import("./pages/Usage"));
 const Storage = lazy(() => import("./pages/Storage"));
+const AntigravityAccounts = lazy(() => import("./pages/AntigravityAccounts"));
 const CodexSet = lazy(() => import("./pages/CodexSet"));
 const Integrations = lazy(() => import("./pages/Integrations"));
 const Startup = lazy(() => import("./pages/Startup"));
@@ -56,6 +57,7 @@ const PAGE_TKEY: Record<Page, TKey> = {
   remote: "nav.remote",
   "remote-workspace": "nav.remoteWorkspace",
   "codex-set": "nav.codexSet",
+  antigravity: "nav.antigravity",
   integrations: "nav.connect",
   claude: "nav.claude",
 };
@@ -623,6 +625,7 @@ export default function App() {
                 {page === "storage" && <Storage apiBase={sharedBase} />}
                 {page === "remote" && !remotePairingFormOpen && <RemoteLink key={`${sharedBase}:${sharedSessionEpoch}`} apiBase={sharedBase} sessionReady={sharedSessionReady} pairingRecoveryAvailable={hubPairingAvailable} onRequestPairing={() => setHubPairingOpen(true)} workspaceAvailable={remoteWorkspaceAvailable} onOpenWorkspace={() => navigateToPage("remote-workspace")} />}
                 {page === "remote-workspace" && <RemoteWorkspaceRoute available={remoteWorkspaceAvailable} apiBase={sharedBase} hubOrigin={targets.shared.serverOrigin} onOpenRemoteLink={() => navigateToPage("remote")} />}
+                {page === "antigravity" && <AntigravityAccounts key={sharedBase} apiBase={sharedBase} />}
                 {page === "codex-set" && <CodexSet apiBase={sharedBase} machineApiBase={machineBase} connected={targets.connected} />}
                 {shellPage === "integrations" && <Integrations apiBase={sharedBase} machineApiBase={machineBase} connected={targets.connected} />}
                 </Suspense>

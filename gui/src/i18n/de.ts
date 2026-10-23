@@ -1533,6 +1533,7 @@ export const de: Record<TKey, string> = {
   "modal.loggingIn": "Anmelden…",
   "modal.loginTimeout": "Login-Zeitüberschreitung — versuche es erneut.",
 "nav.codexAuth": "Codex-Auth",
+  "nav.antigravity": "Antigravity",
   "nav.codexSet": "Codex",
   "nav.connect": "Verbinden",
   "nav.usageLogs": "Nutzung & Protokolle",
