@@ -7,7 +7,6 @@ export interface AccountQuota {
   /** Codex account API aliases for the same five-hour window. */
   shortPercent?: number;
   monthlyPercent?: number;
-  monthlyIsPrimaryWindow?: boolean;
   weeklyResetAt?: number;
   fiveHourResetAt?: number;
   shortResetAt?: number;

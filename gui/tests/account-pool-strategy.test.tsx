@@ -138,8 +138,8 @@ describe("account pool strategy helpers", () => {
     expect(normalizeAccountPoolStrategy("round-robin")).toBe("round-robin");
     expect(normalizeAccountPoolStrategy("fill-first")).toBe("fill-first");
     expect(normalizeAccountPoolStrategy("reset-first")).toBe("reset-first");
-    expect(normalizeAccountPoolStrategy("quota-pace")).toBe("quota-pace");
     expect(normalizeAccountPoolStrategy("weighted")).toBe(DEFAULT_ACCOUNT_POOL_STRATEGY);
+    expect(normalizeAccountPoolStrategy("quota-pace")).toBe(DEFAULT_ACCOUNT_POOL_STRATEGY);
     expect(normalizeAccountPoolStrategy(undefined)).toBe("quota");
   });
 
@@ -744,12 +744,4 @@ test("canonical reset-first settings survive a read and an empty successful writ
     return new Response(null, { status: 204 });
   });
   expect(written?.strategy).toBe("reset-first");
-});
-
-
-test("quota pace uses the existing Codex strategy control and explains affinity", () => {
-  const markup = renderToStaticMarkup(<LanguageProvider><AccountPoolStrategyControls codex strategy="quota-pace"
-    threshold={80} stickyDraft="1" onStrategyChange={() => {}} onStickyDraftChange={() => {}} onStickyCommit={() => {}} /></LanguageProvider>);
-  expect(markup).toContain("Quota pace");
-  expect(markup).toContain("Existing sessions keep their account");
 });

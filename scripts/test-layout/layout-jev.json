@@ -1,6 +1,5 @@
 {
   "routing-context-rules.test.ts": "routing",
-  "codex-quota-pace.test.ts": "codex-integration",
   "usage-context-inspector.test.ts": "usage",
   "jev-session-pin.test.ts": "routing",
   "server-jev-session-pin.test.ts": "server",

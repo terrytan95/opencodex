@@ -1070,16 +1070,6 @@
       ]
     },
     {
-      "path": "quota-pace.md",
-      "tier": 2,
-      "title": "Quota Pace",
-      "scope": "Codex same-plan remaining quota pacing and on-demand observation trends.",
-      "documents": [
-        "src/codex/quota-pace.ts",
-        "gui/src/components/CodexQuotaPace.tsx"
-      ]
-    },
-    {
       "path": "routing-rules.md",
       "tier": 2,
       "title": "Routing Rules",
