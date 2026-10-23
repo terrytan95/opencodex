@@ -2048,6 +2048,7 @@ export const pt: Record<TKey, string> = {
   "modal.adding": "Adicionando…",
   "modal.useOauthLogin": "← Usar login OAuth",
   "nav.codexAuth": "Autenticação do Codex",
+  "nav.antigravity": "Antigravity",
   "nav.codexSet": "Codex",
   "nav.connect": "Conexão",
   "nav.usageLogs": "Uso e logs",

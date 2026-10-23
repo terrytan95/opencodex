@@ -2023,6 +2023,7 @@ export const ru: Record<TKey, string> = {
   "modal.adding": "Добавление…",
   "modal.useOauthLogin": "← Войти через OAuth",
 "nav.codexAuth": "Аутентификация Codex",
+  "nav.antigravity": "Antigravity",
   "nav.codexSet": "Codex",
   "nav.connect": "Подключение",
   "nav.usageLogs": "Использование и журналы",

@@ -2037,6 +2037,7 @@ export const fr: Record<TKey, string> = {
   "modal.adding": "Ajout…",
   "modal.useOauthLogin": "← Utiliser la connexion OAuth",
 "nav.codexAuth": "Authentification Codex",
+  "nav.antigravity": "Antigravity",
   "nav.codexSet": "Codex",
   "nav.connect": "Connexion",
   "nav.usageLogs": "Utilisation et journaux",

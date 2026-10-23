@@ -2064,6 +2064,7 @@ export const en = {
   "modal.adding": "Adding…",
   "modal.useOauthLogin": "← Use OAuth login",
 "nav.codexAuth": "Codex Auth",
+  "nav.antigravity": "Antigravity",
   "nav.codexSet": "Codex",
   "nav.connect": "Connect",
   "nav.usageLogs": "Usage & Logs",

@@ -2050,6 +2050,7 @@ export const tr: Record<TKey, string> = {
   "modal.adding": "Ekleniyor…",
   "modal.useOauthLogin": "← OAuth girişini kullan",
 "nav.codexAuth": "Codex Kimlik Doğrulama",
+  "nav.antigravity": "Antigravity",
   "nav.codexSet": "Codex",
   "nav.connect": "Bağlantı",
   "nav.usageLogs": "Kullanım ve Günlükler",
