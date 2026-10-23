@@ -1,3 +1,4 @@
+import { inspectContext, finishContext, type ContextDraft } from "../usage/context-inspector";
 import { existsSync, readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { stampApiKeyAccountLabel, usesApiKeyAccount } from "../providers/label";
@@ -125,6 +126,7 @@ export interface RequestLogContext extends UpstreamErrorDiagnostics {
   logicalRequestId?: string;
   /** Process-local privacy-bounded cache diagnostic; never persisted with request logs. */
   cacheDiagnosticDraft?: CacheDiagnosticDraft;
+  contextDraft?: ContextDraft;
   /**
    * Internal live reference to this request's execution budget; omitted from RequestLogEntry and
    * JSONL. Read at final-log time so the row reports the budget's FINAL state rather than a
@@ -280,7 +282,9 @@ export function observeCacheDiagnosticInbound(
   body: unknown,
   headers: Headers,
   source: PromptCacheKeySource,
+  captureContext = true,
 ): void {
+  if (captureContext) logCtx.contextDraft ??= inspectContext(body, headers, logCtx.apiKeyId);
   const draft = cacheDiagnosticHooks()?.observeInbound(body, headers, source);
   if (draft) logCtx.cacheDiagnosticDraft = draft;
 }
@@ -1465,6 +1469,11 @@ export function addFinalRequestLog(
   });
   const logicalRequestId = logCtx.logicalRequestId ?? logCtx.executionBudget?.logicalRequestId;
   const normalizedCacheValue = loggedUsage?.cacheReadInputTokens ?? loggedUsage?.cachedInputTokens;
+  const contextUsage = attempts?.length ? attempts.at(-1)?.usage : loggedUsage;
+  finishContext(logCtx.contextDraft, { provider: logCtx.provider, model: logCtx.model,
+    inputTokens: contextUsage?.estimated ? undefined : contextUsage?.inputTokens,
+    cachedTokens: cacheProvenance === "observed" ? (contextUsage?.cacheReadInputTokens ?? contextUsage?.cachedInputTokens) : undefined });
+  logCtx.contextDraft = undefined;
   cacheDiagnosticHooks()?.finalize({
     requestId,
     ...(isLogicalRequestId(logicalRequestId) ? { logicalRequestId } : {}),

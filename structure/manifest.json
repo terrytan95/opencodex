@@ -1055,6 +1055,19 @@
         "src/oauth/api-key-pool-preserve.ts",
         "gui/src/account-pause-display.ts"
       ]
+    },
+    {
+      "path": "context-inspector.md",
+      "tier": 5,
+      "title": "Context Inspector",
+      "scope": "Opt-in bounded request composition and in-memory context diagnostics.",
+      "documents": [
+        "src/usage/context-inspector.ts",
+        "src/usage/context-inspector-types.ts",
+        "src/server/request-log.ts",
+        "src/server/management/logs-usage-routes.ts",
+        "gui/src/pages/usage-context.tsx"
+      ]
     }
   ],
   "contracts": {

@@ -1,0 +1,28 @@
+.context-inspector{display:grid;gap:var(--space-4);max-width:960px}
+.context-capture,.context-session-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-4)}
+.context-capture h3,.context-capture p,.context-session-head p{margin:0}
+.context-capture p,.context-session-head p{margin-top:var(--space-1)}
+.context-session{padding:var(--space-5)}
+.context-total{display:flex;flex-direction:column;align-items:flex-end;flex-shrink:0}
+.context-total strong{font-size:var(--text-title)}
+.context-session-head strong{overflow-wrap:anywhere}
+.context-bar{display:flex;gap:var(--space-0-5);height:var(--space-3);border-radius:var(--radius-pill);overflow:hidden;background:var(--raised);margin:var(--space-4) 0}
+.context-part{min-width:2px}
+.context-part-instructions{background:var(--text)}
+.context-part-tools{background:var(--muted)}
+.context-part-mcp{background:var(--green)}
+.context-part-files{background:var(--amber)}
+.context-part-results{background:var(--faint)}
+.context-part-conversation{background:var(--border)}
+.context-legend{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-3);margin:0 0 var(--space-4)}
+.context-legend dt{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-label);color:var(--muted)}
+.context-dot{width:8px;height:8px;border-radius:var(--radius-round);flex-shrink:0}
+.context-legend dd{margin:var(--space-1) 0 0 var(--space-4);font-size:var(--text-control)}
+.context-facts{display:flex;flex-wrap:wrap;gap:var(--space-3);margin-bottom:var(--space-3)}
+.context-session summary{cursor:pointer;font-size:var(--text-label);padding:var(--space-2) 0}
+.context-largest{padding:0;list-style:none;font-size:var(--text-control)}
+.context-largest li{display:flex;justify-content:space-between;gap:var(--space-3);padding:var(--space-2) 0;border-top:1px solid var(--border)}
+.context-empty{padding:var(--space-6) 0}
+@media(max-width:600px){.context-legend{grid-template-columns:repeat(2,minmax(0,1fr))}.context-session{padding:var(--space-4)}}
+
+.context-trend{display:block;width:100%;height:48px;color:var(--green);margin-top:var(--space-3)}

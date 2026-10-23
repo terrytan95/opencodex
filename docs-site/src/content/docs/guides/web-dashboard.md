@@ -509,3 +509,16 @@ test for the same provider returns 409. Completed diagnostics and applicability
 results return 200, including a structured error when inference fails. Destination
 policy and provider egress settings apply; redirects, retries and failover are disabled.
 For the CLI workflow, see [Providers and accounts](/reference/cli/providers-accounts/).
+
+
+## Context capture
+
+Open **Usage → Context** and enable capture, then send a message in your client.
+The view separates estimated instructions, tools, MCP tools, files, tool results and conversation,
+with request-to-request changes and reported input/cache counts when available. Expand a session's
+largest contributions to find oversized inputs. No prompt text is stored.
+
+Capture stops after 30 minutes. It retains the latest 32 requests for up to 64 sessions in memory;
+starting a new capture clears the previous sample. A bounded sample or server-held prior context
+is labelled as incomplete. Estimates describe the normalized inbound request and may differ from
+provider billing or the final translated wire payload. No routing or client settings are changed.

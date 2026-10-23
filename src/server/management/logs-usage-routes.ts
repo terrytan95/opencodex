@@ -1,3 +1,4 @@
+import { contextSnapshot, setContextCapture } from "../../usage/context-inspector";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { CatalogModel } from "../../codex/catalog";
@@ -112,6 +113,19 @@ function refreshedUsageSummary<T extends UsageSummary & { historyTruncated: bool
 
 export async function handleLogsUsageRoutes(ctx: ManagementContext): Promise<Response | null> {
   const { req, url, config, deps, syncClaudeAgentDefsBestEffort } = ctx;
+
+  if (url.pathname === "/api/context-inspector" && req.method === "GET") {
+    return Response.json(contextSnapshot(), { headers: { "Cache-Control": "no-store" } });
+  }
+  if (url.pathname === "/api/context-inspector" && req.method === "PUT") {
+    let body: unknown;
+    try { body = await readManagementJsonBody(req); }
+    catch (error) { rethrowManagementBodyTooLarge(error); return jsonResponse({ error: "invalid_body" }, 400); }
+    if (!isPlainRecord(body) || typeof body.enabled !== "boolean" || Object.keys(body).length !== 1) {
+      return jsonResponse({ error: "invalid_body" }, 400);
+    }
+    return Response.json(setContextCapture(body.enabled), { headers: { "Cache-Control": "no-store" } });
+  }
 
   if (url.pathname === "/api/logs" && req.method === "GET") {
     const rawCursor = url.searchParams.get("cursor");

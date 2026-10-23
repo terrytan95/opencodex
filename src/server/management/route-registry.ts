@@ -94,6 +94,8 @@ export interface ManagementRoute {
 
 /** Every reachable management route. */
 export const MANAGEMENT_ROUTES: readonly ManagementRoute[] = [
+  { method: "GET", path: "/api/context-inspector", module: "server/management/logs-usage-routes", mutates: false, exempt: { reason: "deferred-verb", why: "Bounded dashboard-only capture has no CLI verb.", owner: "context inspector", ownerDoc: "structure/dashboard-and-usage.md" } },
+  { method: "PUT", path: "/api/context-inspector", module: "server/management/logs-usage-routes", mutates: true, exempt: { reason: "deferred-verb", why: "Bounded dashboard-only capture has no CLI verb.", owner: "context inspector", ownerDoc: "structure/dashboard-and-usage.md" } },
   // server/management-api
   { method: "POST", path: "/api/stop", module: "server/management-api", mutates: true },
   // codex/auth-api

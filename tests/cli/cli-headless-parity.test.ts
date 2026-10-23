@@ -635,6 +635,8 @@ describe("headless GUI parity CLI", () => {
       ["/api/system", "ocx observe/system"],
       ["/api/update", "ocx system update"],
       ["/api/usage", "ocx observe usage"],
+      // Transient dashboard capture; no durable configuration or CLI verb.
+      ["/api/context-inspector", "(none — bounded dashboard diagnostics)"],
       ["/api/v2", "ocx v2/agent"],
       ["/api/windows-tray", "ocx tray"],
     ];

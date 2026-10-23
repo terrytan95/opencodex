@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useI18n, type TFn, type Locale } from "../i18n/shared";
 import { readUsageResponseJson, UsageReadFailedError, type UsageReadMetadata } from "../usage-summary-resource";
 import { UsageIncompleteNotice } from "../components/usage-incomplete-notice";
@@ -17,6 +17,8 @@ import { sectionAnchorId } from "../section-anchors";
 import { parseUsageTimeRange, type UsageRangeError, type UsageTimeWindow } from "../usage-time-range";
 import UsageCompanionView from "./usage-companion-view";
 import { readUsageTab, selectUsageTab, usageTabKeyDown } from "./usage-tab-keydown";
+
+const UsageContext = lazy(() => import("./usage-context"));
 
 type Range = "all" | "30d" | "7d";
 type UsageSurface = "all" | "codex" | "claude" | "grok";
@@ -1167,17 +1169,19 @@ export default function Usage({ apiBase, connected = false, apiKeyId }: { apiBas
         {tab === "report" && <UsageFilters surface={surface} range={customWindow ? null : range} onSurface={setSurface} onRange={selectRange} t={t} />}
       </div>
       <div className="page-tabs" role="tablist" aria-label={t("nav.usage")}>
-        {(["report", "companion"] as const).map(item => (
+        {(["report", "context", "companion"] as const).map(item => (
           <button key={item} type="button" role="tab" id={`usage-tab-${item}`}
             aria-selected={tab === item} aria-controls={`usage-panel-${item}`}
             tabIndex={tab === item ? 0 : -1}
             className={`page-tab${tab === item ? " page-tab--active" : ""}`}
             onClick={() => selectUsageTab(item)} onKeyDown={usageTabKeyDown}>
-            {t(item === "report" ? "usage.workspace.report" : "usage.section.companion")}
+            {t(item === "report" ? "usage.workspace.report" : item === "context" ? "context.title" : "usage.section.companion")}
           </button>
         ))}
       </div>
-      {tab === "companion" ? (
+      {tab === "context" ? <div role="tabpanel" id="usage-panel-context" aria-labelledby="usage-tab-context">
+        <Suspense fallback={<p className="muted">{t("common.loading")}</p>}><UsageContext key={apiBase} apiBase={apiBase} /></Suspense>
+      </div> : tab === "companion" ? (
         <div role="tabpanel" id="usage-panel-companion" aria-labelledby="usage-tab-companion">
           <UsageCompanionView apiBase={apiBase} providers={data?.providers ?? []} />
         </div>
