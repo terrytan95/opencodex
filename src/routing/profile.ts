@@ -1,3 +1,4 @@
+import { routingRulesError, type RoutingRule } from "./rules";
 /**
  * Routing policy profiles (RI-04): schema validation, normalization, revision
  * digest, and id/alias resolution. Mirrors the combos module discipline
@@ -68,6 +69,7 @@ export interface NormalizedRoutingProfileRequirements {
 }
 
 export interface NormalizedRoutingProfile {
+  rules?: RoutingRule[];
   id: string;
   alias: string | null;
   candidates: Array<{ provider: string; model: string }>;
@@ -420,6 +422,10 @@ export function routingProfileIssues(
     }
   }
 
+  const ruleError = routingRulesError(body.rules, Array.isArray(body.candidates) ? body.candidates.filter(
+    (candidate): candidate is { provider: string; model: string } => !!candidate && typeof candidate === "object" && typeof candidate.provider === "string" && typeof candidate.model === "string",
+  ) : []);
+  if (ruleError) issues.push({ path: ["rules"], message: ruleError });
   return issues;
 }
 
@@ -529,6 +535,7 @@ export function normalizeRoutingProfile(id: string, raw: OcxRoutingProfileConfig
     },
     unknownEvidence: normalizedUnknownEvidence(raw),
     ...(compatibility ? { compatibility } : {}),
+    ...(raw.rules?.length ? { rules: structuredClone(raw.rules) } : {}),
   };
   return { ...profile, revision: profileRevision(profile) };
 }

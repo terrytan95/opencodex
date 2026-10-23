@@ -7,6 +7,21 @@ import type { TKey } from "./en";
  * Turkish i18n catalog. Must match the `TKey` set (compile-checked).
  */
 export const tr: Record<TKey, string> = {
+  "rules.title": "Kurallar",
+  "rules.action": "Eylem",
+  "rules.target": "Hedef",
+  "rules.prefer": "Tercih et",
+  "rules.pause": "Duraklat",
+  "rules.project": "Proje klasörü (isteğe bağlı)",
+  "rules.client": "İstemci (isteğe bağlı)",
+  "rules.schedule": "Zaman aralığı",
+  "rules.start": "Başlangıç",
+  "rules.end": "Bitiş",
+  "rules.zone": "Saat dilimi",
+  "rules.add": "Kural ekle",
+  "rules.at": "Önizleme zamanı",
+  "rules.applied": "{id} kuralı uygulandı",
+  "rules.unavailable": "{id} kuralı: hedef kullanılamıyor; normal puanlama",
   "accountPool.strategyPace": "Kota temposu",
   "accountPool.strategyHintPace": "Aynı plan içinde kalan kotayı sıfırlanmadan kullanın.",
   "accountPool.paceNewSessions": "Mevcut oturumlar hesaplarını korur",

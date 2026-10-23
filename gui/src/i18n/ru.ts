@@ -6,6 +6,21 @@ import type { TKey } from "./en";
  * Russian i18n catalog; must match the `TKey` set (compile-checked).
  */
 export const ru: Record<TKey, string> = {
+  "rules.title": "Правила",
+  "rules.action": "Действие",
+  "rules.target": "Цель",
+  "rules.prefer": "Предпочесть",
+  "rules.pause": "Пауза",
+  "rules.project": "Папка проекта (необязательно)",
+  "rules.client": "Клиент (необязательно)",
+  "rules.schedule": "Период времени",
+  "rules.start": "С",
+  "rules.end": "До",
+  "rules.zone": "Часовой пояс",
+  "rules.add": "Добавить правило",
+  "rules.at": "Время проверки",
+  "rules.applied": "Правило {id} применено",
+  "rules.unavailable": "Правило {id}: цель недоступна; обычная оценка",
   "accountPool.strategyPace": "Темп квоты",
   "accountPool.strategyHintPace": "Использовать остаток до сброса в рамках одного плана.",
   "accountPool.paceNewSessions": "Текущие сеансы сохраняют аккаунт",

@@ -83,3 +83,20 @@ Example save payload:
   }
 }
 ```
+
+
+## Project and time rules
+
+Add a rule in **Models → Routing → Rules**, choose a candidate and **Prefer** or **Pause**,
+then set a project folder, client or schedule. Conditions on a rule all need to match.
+Use the arrows to order preferences; all matching pauses apply. Save before running the preview.
+An unavailable preferred target uses normal scoring. Paused targets are excluded from fallback too.
+
+Project folders include descendants. The client must supply its folder through `x-ocx-project`,
+`metadata.cwd`/`metadata.project`, or a system/developer `<cwd>` marker. Unknown folders do not match.
+Client names come from `x-ocx-client`, `metadata.client`, or recognized originator/User-Agent prefixes
+(`codex`, `claude`, `opencode`, `pi`, `grok`). These hints are not access-control boundaries.
+
+Schedules use the chosen time zone. The end is exclusive; equal start/end means all day.
+An overnight window belongs to its starting weekday. Preview time simulates the schedule only;
+current capability, cost and health evidence still applies. Rules never modify a request body.

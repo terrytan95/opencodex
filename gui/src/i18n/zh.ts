@@ -6,6 +6,21 @@ import type { TKey } from "./en";
  * Chinese i18n catalog; must match the `TKey` set (compile-checked).
  */
 export const zh: Record<TKey, string> = {
+  "rules.title": "规则",
+  "rules.action": "操作",
+  "rules.target": "目标",
+  "rules.prefer": "优先",
+  "rules.pause": "暂停",
+  "rules.project": "项目目录（可选）",
+  "rules.client": "客户端（可选）",
+  "rules.schedule": "时间范围",
+  "rules.start": "开始",
+  "rules.end": "结束",
+  "rules.zone": "时区",
+  "rules.add": "添加规则",
+  "rules.at": "预演时间",
+  "rules.applied": "已应用规则 {id}",
+  "rules.unavailable": "规则 {id}：目标不可用，沿用常规评分",
   "accountPool.strategyPace": "额度节奏",
   "accountPool.strategyHintPace": "同套餐内，优先使用重置前更容易闲置的额度。",
   "accountPool.paceNewSessions": "已有会话保留原账户",

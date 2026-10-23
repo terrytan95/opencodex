@@ -79,6 +79,24 @@ function deps(onSave: () => void = () => {}, onRefresh: () => void = () => {}) {
 }
 
 describe("routing profile management editor API", () => {
+  test("older editors preserve rules, explicit clearing removes them, and dry-run exposes outcomes", async () => {
+    const config = baseConfig();
+    const rules = [{ id: "work", action: "prefer" as const, target: { provider: "a", model: "m1" }, when: { project: "/work" } }];
+    config.routingProfiles!.fast!.rules = rules;
+    const put = new ManagementRequest("http://localhost/api/routing-profiles", { method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "fast", mode: "update", profile: { candidates: [{ provider: "a", model: "m1" }] } }) });
+    expect((await handleManagementAPI(put, new URL(put.url), config, deps()))!.status).toBe(200);
+    expect(config.routingProfiles!.fast!.rules).toEqual(rules);
+    const preview = new ManagementRequest("http://localhost/api/routing-profiles/dry-run", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ profile: "fast", evidence: { project: "/work/repo" }, candidates: [{ provider: "a", model: "m1" }] }) });
+    const result = await handleManagementAPI(preview, new URL(preview.url), config, deps());
+    expect((await result!.json()).rule).toEqual({ id: "work", outcome: "applied" });
+    const clear = new ManagementRequest("http://localhost/api/routing-profiles", { method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "fast", mode: "update", profile: { candidates: [{ provider: "a", model: "m1" }], rules: [] } }) });
+    expect((await handleManagementAPI(clear, new URL(clear.url), config, deps()))!.status).toBe(200);
+    expect(config.routingProfiles!.fast!.rules).toBeUndefined();
+  });
+
   test("GET exposes the configured alias for editor round-trips", async () => {
     const config = baseConfig();
     const req = new ManagementRequest("http://localhost/api/routing-profiles", { method: "GET" });

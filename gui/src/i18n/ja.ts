@@ -6,6 +6,21 @@ import type { TKey } from "./en";
  * Japanese i18n catalog; must match the `TKey` set (compile-checked).
  */
 export const ja: Record<TKey, string> = {
+  "rules.title": "ルール",
+  "rules.action": "操作",
+  "rules.target": "対象",
+  "rules.prefer": "優先",
+  "rules.pause": "停止",
+  "rules.project": "プロジェクトフォルダー（任意）",
+  "rules.client": "クライアント（任意）",
+  "rules.schedule": "時間帯",
+  "rules.start": "開始",
+  "rules.end": "終了",
+  "rules.zone": "タイムゾーン",
+  "rules.add": "ルールを追加",
+  "rules.at": "プレビュー時刻",
+  "rules.applied": "ルール {id} を適用",
+  "rules.unavailable": "ルール {id}：対象が利用不可のため通常評価",
   "accountPool.strategyPace": "クォータのペース",
   "accountPool.strategyHintPace": "同じプランで、リセット前に余りそうな枠を優先。",
   "accountPool.paceNewSessions": "既存セッションのアカウントは維持",

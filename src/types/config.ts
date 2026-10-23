@@ -1574,6 +1574,7 @@ export interface OcxRoutingProfileCompatibility {
 }
 
 export interface OcxRoutingProfileConfig {
+  rules?: import("../routing/rules").RoutingRule[];
   /**
    * Explicit candidate allowlist (`provider/model` refs). No implicit
    * expansion in v1.

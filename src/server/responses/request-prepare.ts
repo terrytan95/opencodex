@@ -1,3 +1,4 @@
+import { routingHints, hasRoutingRules } from "../../routing/rules";
 import type { HandleResponsesOptions, ResponsesRequestContext, ResponsesAdmissionState, ResponsesDispatchers } from "./core-options";
 import type { PolicyRequestEvidence } from "../../routing/evaluator";
 import type { RequestLogContext } from "../request-log";
@@ -68,7 +69,7 @@ import {
 } from "../../responses/state";
 import { formatErrorResponse } from "../../bridge";
 import { mapCodexAuthContextErrorToResponse } from "./codex-auth-error";
-import type { OcxParsedRequest } from "../../types";
+import type { OcxParsedRequest, OcxConfig } from "../../types";
 import { buildToolBridgeMaps } from "./collaboration";
 import { parseRequest } from "../../responses/parser";
 import { anthropicSessionKeyFromParts } from "../../oauth/anthropic-routing";
@@ -175,8 +176,9 @@ import {
 import { redactHostedImageDisplayPaths } from "../responses-hosted-image-display";
 
 /** Policy-routing evidence. The direct lane's settings-only body has no conversation to scan. */
-function routeEvidence(options: Pick<HandleResponsesOptions, "directRequest">, parsed: OcxParsedRequest): PolicyRequestEvidence {
-  return options.directRequest?.evidence ?? evidenceFromBody(parsed._rawBody);
+function routeEvidence(options: Pick<HandleResponsesOptions, "directRequest">, parsed: OcxParsedRequest, headers: Headers, config: OcxConfig): PolicyRequestEvidence {
+  return options.directRequest ? { ...options.directRequest.evidence, ...(hasRoutingRules(config) ? routingHints(parsed._rawBody, headers) : {}) }
+    : evidenceFromBody(parsed._rawBody, headers, hasRoutingRules(config));
 }
 
 /**
@@ -707,8 +709,8 @@ export async function prepareResponsesRequest(
       const resolved = concreteSelection
         ? routeConcreteModel(config, modelId)
         : parsed._compactionRequest === true
-          ? routeCompactionModel(config, modelId, routeEvidence(options, parsed))
-          : routeModel(config, modelId, routeEvidence(options, parsed));
+          ? routeCompactionModel(config, modelId, routeEvidence(options, parsed, req.headers, config))
+          : routeModel(config, modelId, routeEvidence(options, parsed, req.headers, config));
       // A Pool 2 selector may leave Pool 2 only through an operator-configured cross-provider
       // blocked-model redirect, which the router marks as a credential-domain rewrite. Any other
       // destination means the selector fell through to default resolution, which stays refused.
@@ -1028,7 +1030,7 @@ export async function prepareResponsesRequest(
     if (fallback?.to && !slugsEquivalent(fallback.to, route.modelId)) {
       try {
         route = captureInboundRoutePolicy(
-          routeModel(config, fallback.to, routeEvidence(options, parsed)),
+          routeModel(config, fallback.to, routeEvidence(options, parsed, req.headers, config)),
         );
         leaveDirectLaneIfRerouted(options, route, parsed, logCtx);
         credentialDomainWasRewritten = true;
@@ -1250,7 +1252,7 @@ export async function prepareResponsesRequest(
           if (fallback?.to && !slugsEquivalent(fallback.to, route.modelId)) {
             try {
               route = captureInboundRoutePolicy(
-                routeModel(config, fallback.to, routeEvidence(options, parsed)),
+                routeModel(config, fallback.to, routeEvidence(options, parsed, req.headers, config)),
               );
               leaveDirectLaneIfRerouted(options, route, parsed, logCtx);
               credentialDomainWasRewritten = true;

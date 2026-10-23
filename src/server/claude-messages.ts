@@ -1,3 +1,4 @@
+import { hasRoutingRules, routingHints } from "../routing/rules";
 /**
  * Anthropic Messages inbound (/v1/messages + /v1/messages/count_tokens) for Claude Code.
  *
@@ -868,7 +869,7 @@ async function handleClaudeMessagesWithBudget(
   };
   let directLeaveError: unknown;
   try {
-    const route = routeModel(config, internalBody.model as string, directPlan ? directPlan.evidence : evidenceFromBody(internalBody));
+    const route = routeModel(config, internalBody.model as string, directPlan ? { ...directPlan.evidence, ...(hasRoutingRules(config) ? routingHints(internalBody, req.headers) : {}) } : evidenceFromBody(internalBody, req.headers, hasRoutingRules(config)));
     // Settle the wire once so the sampling decision below reads the effective
     // adapter rather than the provider-wide default (#404).
     route.staticPolicy = captureRouteStaticPolicy(

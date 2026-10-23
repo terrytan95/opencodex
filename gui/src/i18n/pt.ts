@@ -8,6 +8,21 @@ import type { TKey } from "./en";
  * Technical terms and model identifiers intentionally remain English.
  */
 export const pt: Record<TKey, string> = {
+  "rules.title": "Regras",
+  "rules.action": "Ação",
+  "rules.target": "Destino",
+  "rules.prefer": "Preferir",
+  "rules.pause": "Pausar",
+  "rules.project": "Pasta do projeto (opcional)",
+  "rules.client": "Cliente (opcional)",
+  "rules.schedule": "Faixa de horário",
+  "rules.start": "De",
+  "rules.end": "Até",
+  "rules.zone": "Fuso horário",
+  "rules.add": "Adicionar regra",
+  "rules.at": "Horário da prévia",
+  "rules.applied": "Regra {id} aplicada",
+  "rules.unavailable": "Regra {id}: destino indisponível; pontuação normal",
   "accountPool.strategyPace": "Ritmo da cota",
   "accountPool.strategyHintPace": "Use a cota antes da renovação, dentro do mesmo plano.",
   "accountPool.paceNewSessions": "Sessões existentes mantêm a conta",

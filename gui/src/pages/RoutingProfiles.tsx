@@ -1,3 +1,6 @@
+import { routingRulesError } from "../../../src/routing/rules";
+import RoutingRulesEditor from "../components/RoutingRulesEditor";
+import "../styles-routing-rules.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   modelOptionsForProvider,
@@ -44,6 +47,7 @@ type Analytics = {
 };
 
 type DryRunResult = {
+  rule?: { id: string; outcome: "applied" | "unavailable" };
   candidates: DryRunCandidate[];
   selectedIndex: number | null;
   trace?: { profile?: { revision?: string } };
@@ -183,6 +187,7 @@ function parseProfiles(raw: unknown): RoutingProfileDto[] {
       && typeof profile.model === "string"
       && typeof profile.revision === "string"
       && Array.isArray(profile.candidates)
+      && !routingRulesError(profile.rules, profile.candidates)
       && isPlainObject(profile.require)
       && isPlainObject(profile.optimize)
       && isPlainObject(profile.limits)
@@ -268,6 +273,7 @@ export default function RoutingProfiles({
   const [status, setStatus] = useState<{ message: string; ok: boolean } | null>(null);
   const [saving, setSaving] = useState(false);
   const [context, setContext] = useState("");
+  const [rulePreview, setRulePreview] = useState({ project: "", client: "", at: "" });
   const [tools, setTools] = useState(false);
   const [image, setImage] = useState(false);
   const [structured, setStructured] = useState(false);
@@ -563,7 +569,9 @@ export default function RoutingProfiles({
     setDryRunResult(null);
     setDryRunError("");
     try {
-      const evidence: Record<string, number | boolean> = {};
+      const evidence: Record<string, number | boolean | string> = {};
+      if (rulePreview.project) evidence.project = rulePreview.project;
+      if (rulePreview.client) evidence.client = rulePreview.client;
       const contextTokens = context.trim() ? Number(context.trim()) : NaN;
       if (Number.isFinite(contextTokens) && contextTokens > 0) {
         evidence.contextWindow = contextTokens;
@@ -577,6 +585,7 @@ export default function RoutingProfiles({
         body: JSON.stringify({
           profile: selected.id,
           evidence,
+          ...(rulePreview.at ? { at: new Date(rulePreview.at).getTime() } : {}),
         }),
       });
       if (generation !== dryRunGenerationRef.current) return;
@@ -730,6 +739,9 @@ export default function RoutingProfiles({
               </button>
             </div>
           </fieldset>
+
+          <RoutingRulesEditor rules={draft.rules ?? []} candidates={draft.candidates} disabled={saving}
+            onChange={rules => setDraft(current => current ? { ...current, rules } : current)} />
 
           <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
             <legend className="field-label">{t("routing.require")}</legend>
@@ -1017,6 +1029,10 @@ export default function RoutingProfiles({
       {selected && (
       <div className="panel" style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
         <h3>{t("routing.dryRun")}</h3>
+        <div className="model-grid">{(["project", "client", "at"] as const).map(key => <label className="field-label" key={key}>
+          {t(`rules.${key}`)}<input className="input" type={key === "at" ? "datetime-local" : "text"}
+            value={rulePreview[key]} onChange={event => { setRulePreview(current => ({ ...current, [key]: event.target.value })); clearDryRun(); }} />
+        </label>)}</div>
         <label className="field-label" htmlFor="routing-context">
           {t("routing.dryRunContext")}
           <input
@@ -1067,6 +1083,7 @@ export default function RoutingProfiles({
         <button type="button" className="btn btn-primary" disabled={!selected || running} onClick={() => void runDryRun()}>
           {t("routing.dryRunRun")}
         </button>
+        {dryRunResult?.rule && <p className="text-label">{t(`rules.${dryRunResult.rule.outcome}`, { id: dryRunResult.rule.id })}</p>}
         {dryRunError ? <Notice tone="err">{dryRunError}</Notice> : null}
         {dryRunResult ? (
           <table className="tbl">

@@ -8,6 +8,21 @@ import { desktopCompatibilityCopy } from "./desktop-compatibility-copy";
  * `{var}` are plain interpolations.
  */
 export const en = {
+  "rules.title": "Rules",
+  "rules.action": "Action",
+  "rules.target": "Target",
+  "rules.prefer": "Prefer",
+  "rules.pause": "Pause",
+  "rules.project": "Project folder (optional)",
+  "rules.client": "Client (optional)",
+  "rules.schedule": "Time window",
+  "rules.start": "From",
+  "rules.end": "Until",
+  "rules.zone": "Time zone",
+  "rules.add": "Add rule",
+  "rules.at": "Preview time",
+  "rules.applied": "Rule {id} applied",
+  "rules.unavailable": "Rule {id}: target unavailable; normal scoring used",
   "accountPool.strategyPace": "Quota pace",
   "accountPool.strategyHintPace": "Use remaining quota before it resets, within the same plan.",
   "accountPool.paceNewSessions": "Existing sessions keep their account",

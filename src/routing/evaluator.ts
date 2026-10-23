@@ -1,3 +1,4 @@
+import { routingRuleMatches } from "./rules";
 /**
  * Deterministic policy-profile evaluator (RI-04 core; extended by RI-05..08).
  *
@@ -38,6 +39,8 @@ export const QUOTA_UNKNOWN_PENALTY_SCORE = 0.3;
 export const COST_UNKNOWN_PENALTY_SCORE = 0.3;
 
 export interface PolicyRequestEvidence {
+  project?: string;
+  client?: string;
   /** Required context window for this request (tokens). */
   contextWindow?: number;
   toolsRequired?: boolean;
@@ -79,6 +82,7 @@ export interface PolicyEvaluationCandidate {
 }
 
 export interface PolicyEvaluationResult {
+  rule?: { id: string; outcome: "applied" | "unavailable" };
   profileId: string;
   profileRevision: string;
   candidates: PolicyEvaluationCandidate[];
@@ -263,10 +267,13 @@ export function evaluatePolicyProfile(
   requestEvidence: PolicyRequestEvidence,
   candidateEvidence: PolicyCandidateEvidence[],
   now = Date.now(),
+  ruleTime = now,
 ): PolicyEvaluationResult {
   const profile = getRoutingProfile(config, profileId);
   if (!profile) throw new Error(`Unknown routing profile: ${profileId}`);
 
+  const matchingRules = profile.rules?.filter(rule => routingRuleMatches(rule, requestEvidence, ruleTime)) ?? [];
+  const preferred = matchingRules.find(rule => rule.action === "prefer");
   const candidates: PolicyEvaluationCandidate[] = [];
   let selectedIndex: number | null = null;
   let bestScore = Number.NEGATIVE_INFINITY;
@@ -398,6 +405,9 @@ export function evaluatePolicyProfile(
       costValue = COST_UNKNOWN_PENALTY_SCORE;
     }
 
+    const paused = matchingRules.find(rule => rule.action === "pause" && rule.target.provider === declared.provider && rule.target.model === declared.model);
+    if (paused) { eligible = false; exclusions.push({ code: "rule-paused", detail: paused.id }); }
+
     const priorityScore = configuredPriorityScore(index, profile.candidates.length);
     const healthWeight = profile.optimize.health;
     const quotaWeight = profile.optimize.quota;
@@ -461,6 +471,10 @@ export function evaluatePolicyProfile(
     }
   });
 
+  const preferredIndex = preferred ? candidates.findIndex(candidate => candidate.eligible
+    && candidate.provider === preferred.target.provider && candidate.model === preferred.target.model) : -1;
+  if (preferredIndex >= 0) selectedIndex = preferredIndex;
+  const rule = preferred ? { id: preferred.id, outcome: preferredIndex >= 0 ? "applied" as const : "unavailable" as const } : undefined;
   const trace = buildRouteDecisionTrace({
     requestedModel: policyModelId(profileId),
     routeKind: "policy",
@@ -485,11 +499,13 @@ export function evaluatePolicyProfile(
         candidateIndex: selectedIndex,
         provider: candidates[selectedIndex]!.provider,
         model: candidates[selectedIndex]!.model,
-        reason: "policy-selected",
+        reason: preferredIndex >= 0 ? "rule-preferred" : "policy-selected",
+        ...(rule ? { tieBreak: `rule:${rule.id}:${rule.outcome}` } : {}),
       },
   });
 
   return {
+    ...(rule ? { rule } : {}),
     profileId: profile.id,
     profileRevision: profile.revision,
     candidates,

@@ -6,6 +6,21 @@ import type { TKey } from "./en";
  * French i18n catalog. Must match the `TKey` set.
  */
 export const fr: Record<TKey, string> = {
+  "rules.title": "Règles",
+  "rules.action": "Action",
+  "rules.target": "Cible",
+  "rules.prefer": "Préférer",
+  "rules.pause": "Suspendre",
+  "rules.project": "Dossier du projet (facultatif)",
+  "rules.client": "Client (facultatif)",
+  "rules.schedule": "Plage horaire",
+  "rules.start": "Début",
+  "rules.end": "Fin",
+  "rules.zone": "Fuseau horaire",
+  "rules.add": "Ajouter une règle",
+  "rules.at": "Heure de simulation",
+  "rules.applied": "Règle {id} appliquée",
+  "rules.unavailable": "Règle {id} : cible indisponible ; classement normal",
   "accountPool.strategyPace": "Rythme du quota",
   "accountPool.strategyHintPace": "Utiliser le quota avant sa remise à zéro, à forfait identique.",
   "accountPool.paceNewSessions": "Les sessions existantes gardent leur compte",

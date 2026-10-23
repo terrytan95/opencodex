@@ -1078,6 +1078,20 @@
         "src/codex/quota-pace.ts",
         "gui/src/components/CodexQuotaPace.tsx"
       ]
+    },
+    {
+      "path": "routing-rules.md",
+      "tier": 2,
+      "title": "Routing Rules",
+      "scope": "Optional project, client and zoned time conditions within existing routing profiles.",
+      "documents": [
+        "src/routing/rules.ts",
+        "src/routing/profile.ts",
+        "src/routing/evaluator.ts",
+        "src/routing/request-evidence.ts",
+        "src/server/management/routing-profile-routes.ts",
+        "gui/src/components/RoutingRulesEditor.tsx"
+      ]
     }
   ],
   "contracts": {

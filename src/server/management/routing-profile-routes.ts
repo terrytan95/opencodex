@@ -43,6 +43,7 @@ function profileDto(config: Parameters<typeof getRoutingProfile>[0], id: string)
     limits: profile.limits,
     unknownEvidence: profile.unknownEvidence,
     ...(profile.compatibility ? { compatibility: profile.compatibility } : {}),
+    ...(profile.rules?.length ? { rules: profile.rules } : {}),
   };
 }
 
@@ -60,6 +61,12 @@ function parseEvidence(raw: unknown): { evidence: PolicyRequestEvidence; ok: boo
   }
   if (typeof record.reasoningEffort === "string") evidence.reasoningEffort = record.reasoningEffort;
   if (typeof record.serviceTier === "string") evidence.serviceTier = record.serviceTier;
+  for (const key of ["project", "client"] as const) {
+    if (record[key] !== undefined) {
+      if (typeof record[key] !== "string" || record[key].length > (key === "client" ? 64 : 512) || /[\x00-\x1f\x7f]/.test(record[key])) return { evidence: {}, ok: false };
+      evidence[key] = record[key];
+    }
+  }
   return { evidence, ok: true };
 }
 
@@ -274,6 +281,11 @@ export async function handleRoutingProfileRoutes(ctx: ManagementContext): Promis
         }
       }
     }
+    // Older editors omit rules; only an explicit empty list removes a saved rule set.
+    if (mode === "update" && isPlainRecord(body.profile) && body.profile.rules === undefined
+      && config.routingProfiles?.[id]?.rules) {
+      body.profile = { ...body.profile, rules: config.routingProfiles[id]!.rules };
+    }
     const issues = routingProfileIssues(id, body.profile, config, { excludeProfileId: id });
     if (issues.length > 0) {
       return jsonResponse({
@@ -385,7 +397,11 @@ export async function handleRoutingProfileRoutes(ctx: ManagementContext): Promis
     }
     // One clock read for both assembly and evaluation keeps freshness, health,
     // and trace timestamps mutually consistent with the production router.
+    if (body.at !== undefined && (typeof body.at !== "number" || !Number.isFinite(body.at) || body.at < 0 || body.at > 8.64e15)) {
+      return jsonResponse({ error: "invalid preview time" }, 400, req, config);
+    }
     const now = Date.now();
+    const ruleTime = typeof body.at === "number" ? body.at : now;
     // R3-1: dry-run assembles candidate evidence independently of the startup gate, so an
     // operator preview on a process started without profiles would silently omit
     // compatibility evidence and disagree with production. Activate first.
@@ -396,7 +412,7 @@ export async function handleRoutingProfileRoutes(ctx: ManagementContext): Promis
     if (candidateEvidence === null) {
       return jsonResponse({ error: { code: "invalid_candidates", message: "candidates must be an array of evidence objects" } }, 400, req, config);
     }
-    const result = evaluatePolicyProfile(config, profile, evidence, candidateEvidence, now);
+    const result = evaluatePolicyProfile(config, profile, evidence, candidateEvidence, now, ruleTime);
     return jsonResponse(result, 200, req, config);
   }
 

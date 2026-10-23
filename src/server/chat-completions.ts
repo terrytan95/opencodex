@@ -1,3 +1,4 @@
+import { hasRoutingRules } from "../routing/rules";
 /**
  * OpenAI Chat Completions inbound (/v1/chat/completions) for GitHub Copilot App
  * and other OpenAI-compatible clients.
@@ -197,7 +198,7 @@ async function handleChatCompletionsWithBudget(
   // Why the native Chat lane was not taken; stays `unknown-model` when routing threw.
   let nativeDecline: ProtocolReasonCode | undefined = "unknown-model";
   try {
-    const route = routeModel(config, chatBody.model as string, evidenceFromBody(chatBody));
+    const route = routeModel(config, chatBody.model as string, evidenceFromBody(chatBody, req.headers, hasRoutingRules(config)));
     // Preserve the routed destination for Go recognition, then settle the wire before
     // deriving protocol-scoped affinity. Recognition must not inspect the flipped adapter.
     const routedProvider = route.provider;

@@ -8,6 +8,21 @@ import type { TKey } from "./en";
  * Technical terms and model identifiers intentionally remain English.
  */
 export const vi: Record<TKey, string> = {
+  "rules.title": "Quy tắc",
+  "rules.action": "Thao tác",
+  "rules.target": "Đích",
+  "rules.prefer": "Ưu tiên",
+  "rules.pause": "Tạm dừng",
+  "rules.project": "Thư mục dự án (tùy chọn)",
+  "rules.client": "Ứng dụng (tùy chọn)",
+  "rules.schedule": "Khoảng thời gian",
+  "rules.start": "Từ",
+  "rules.end": "Đến",
+  "rules.zone": "Múi giờ",
+  "rules.add": "Thêm quy tắc",
+  "rules.at": "Thời gian xem trước",
+  "rules.applied": "Đã áp dụng quy tắc {id}",
+  "rules.unavailable": "Quy tắc {id}: đích không khả dụng; dùng điểm thông thường",
   "accountPool.strategyPace": "Nhịp sử dụng hạn mức",
   "accountPool.strategyHintPace": "Dùng phần hạn mức trước khi đặt lại, trong cùng gói.",
   "accountPool.paceNewSessions": "Phiên hiện có giữ nguyên tài khoản",

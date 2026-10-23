@@ -6,6 +6,21 @@ import type { TKey } from "./en";
  * Korean i18n catalog; must match the `TKey` set (compile-checked).
  */
 export const ko: Record<TKey, string> = {
+  "rules.title": "규칙",
+  "rules.action": "동작",
+  "rules.target": "대상",
+  "rules.prefer": "우선",
+  "rules.pause": "일시 중지",
+  "rules.project": "프로젝트 폴더(선택)",
+  "rules.client": "클라이언트(선택)",
+  "rules.schedule": "시간 범위",
+  "rules.start": "시작",
+  "rules.end": "종료",
+  "rules.zone": "시간대",
+  "rules.add": "규칙 추가",
+  "rules.at": "미리보기 시간",
+  "rules.applied": "규칙 {id} 적용됨",
+  "rules.unavailable": "규칙 {id}: 대상 사용 불가, 기본 점수 적용",
   "accountPool.strategyPace": "할당량 속도",
   "accountPool.strategyHintPace": "같은 요금제에서 초기화 전에 남을 할당량을 우선 사용합니다.",
   "accountPool.paceNewSessions": "기존 세션은 계정을 유지합니다",

@@ -1,3 +1,4 @@
+import { routingHints } from "./rules";
 /**
  * Cheap request-side evidence extraction for policy routing (RI-05).
  *
@@ -33,12 +34,13 @@ function inputContainsImage(input: unknown): boolean {
   return input.some(containsImagePart);
 }
 
-export function evidenceFromBody(body: unknown): PolicyRequestEvidence {
+export function evidenceFromBody(body: unknown, headers?: Headers, includeHints = false): PolicyRequestEvidence {
   if (!body || typeof body !== "object" || Array.isArray(body)) return {};
   const record = body as Record<string, unknown>;
   const tools = Array.isArray(record.tools) && record.tools.length > 0;
   const image = inputContainsImage(record.input) || inputContainsImage(record.messages);
   return {
+    ...(includeHints ? routingHints(body, headers) : {}),
     ...(tools ? { toolsRequired: true } : {}),
     ...(image ? { imageInputRequired: true } : {}),
   };

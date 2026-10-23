@@ -7,6 +7,21 @@ import type { TKey } from "./en";
  * German i18n catalog, generated from en.ts. Must match the `TKey` set (compile-checked).
  */
 export const de: Record<TKey, string> = {
+  "rules.title": "Regeln",
+  "rules.action": "Aktion",
+  "rules.target": "Ziel",
+  "rules.prefer": "Bevorzugen",
+  "rules.pause": "Pausieren",
+  "rules.project": "Projektordner (optional)",
+  "rules.client": "Client (optional)",
+  "rules.schedule": "Zeitfenster",
+  "rules.start": "Von",
+  "rules.end": "Bis",
+  "rules.zone": "Zeitzone",
+  "rules.add": "Regel hinzufügen",
+  "rules.at": "Vorschauzeit",
+  "rules.applied": "Regel {id} angewendet",
+  "rules.unavailable": "Regel {id}: Ziel nicht verfügbar; normale Bewertung",
   "accountPool.strategyPace": "Kontingenttempo",
   "accountPool.strategyHintPace": "Restkontingent vor dem Reset nutzen, innerhalb desselben Tarifs.",
   "accountPool.paceNewSessions": "Bestehende Sitzungen behalten ihr Konto",

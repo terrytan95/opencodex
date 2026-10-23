@@ -1,3 +1,4 @@
+import type { RoutingRule } from "../../src/routing/rules";
 export type UnknownEvidenceMode = "allow" | "penalize" | "exclude";
 
 export type CompatibilitySuiteDraft = {
@@ -33,6 +34,7 @@ export function newDraftCandidate(
 }
 
 export type RoutingProfileDto = {
+  rules?: RoutingRule[];
   id: string;
   alias: string | null;
   model: string;
@@ -72,6 +74,7 @@ export type RoutingProfileDto = {
 
 
 export type RoutingProfileDraft = {
+  rules?: RoutingRule[];
   id: string;
   alias: string;
   candidates: RoutingProfileDraftCandidate[];
@@ -223,6 +226,7 @@ export function newRoutingProfileDraft(
 export function routingProfileDraftFromDto(profile: RoutingProfileDto): RoutingProfileDraft {
   const compatibility = normalizeCompatibilityDto(profile.compatibility);
   return {
+    ...(profile.rules !== undefined ? { rules: structuredClone(profile.rules) } : {}),
     id: profile.id,
     alias: profile.alias ?? "",
     candidates: profile.candidates.map(candidate => ({ ...candidate, key: newDraftCandidateKey() })),
@@ -320,6 +324,7 @@ export function routingProfilePutBody(
     id: draft.id.trim(),
     ...(mode === "update" && expectedRevision ? { expectedRevision } : {}),
     profile: {
+      ...(draft.rules !== undefined ? { rules: draft.rules } : {}),
       ...(draft.alias.trim() ? { alias: draft.alias.trim() } : {}),
       candidates: draft.candidates.map(candidate => ({
         provider: candidate.provider.trim(),

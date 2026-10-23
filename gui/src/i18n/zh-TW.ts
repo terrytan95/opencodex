@@ -4,6 +4,21 @@ import type { TKey } from "./en";
 
 /** Traditional Chinese (Taiwan) UI strings — keys must match `en.ts` 1:1. */
 export const zhTW: Record<TKey, string> = {
+  "rules.title": "規則",
+  "rules.action": "操作",
+  "rules.target": "目標",
+  "rules.prefer": "優先",
+  "rules.pause": "暫停",
+  "rules.project": "專案目錄（選填）",
+  "rules.client": "用戶端（選填）",
+  "rules.schedule": "時間範圍",
+  "rules.start": "開始",
+  "rules.end": "結束",
+  "rules.zone": "時區",
+  "rules.add": "新增規則",
+  "rules.at": "預覽時間",
+  "rules.applied": "已套用規則 {id}",
+  "rules.unavailable": "規則 {id}：目標不可用，沿用一般評分",
   "accountPool.strategyPace": "額度節奏",
   "accountPool.strategyHintPace": "同方案內，優先使用重設前較容易閒置的額度。",
   "accountPool.paceNewSessions": "現有對話保留原帳戶",
