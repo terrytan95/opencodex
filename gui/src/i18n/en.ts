@@ -8,6 +8,10 @@ import { desktopCompatibilityCopy } from "./desktop-compatibility-copy";
  * `{var}` are plain interpolations.
  */
 export const en = {
+  "cws.jev.sessionPin": "Keep session on one model",
+  "cws.jev.sessionPinHint": "Preserves the selected model between turns.",
+  "cws.jev.sessionPinMinutes": "Idle timeout (minutes)",
+  "cws.err.invalidSessionPin": "Enter an idle timeout from 1 to 1440 minutes.",
   "pws.completion.title": "Model completion test",
   "pws.completion.model": "Model to test",
   "pws.completion.choose": "Choose a model",

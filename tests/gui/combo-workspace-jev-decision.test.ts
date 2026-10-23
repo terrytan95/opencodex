@@ -46,6 +46,25 @@ function parseOne(row: Record<string, unknown>): ComboItem {
 }
 
 describe("JEV decision service in the combo workspace", () => {
+  test("session pin survives round-trip and clears explicitly without affecting other strategies", () => {
+    const item = parseOne({ strategy: "jev", sessionPin: { ttlMs: 90_001 } });
+    expect(item.sessionPin).toEqual({ ttlMs: 90_001 });
+    expect(toPutBody(item).combo.sessionPin).toEqual(item.sessionPin);
+    expect(draftEquals(item, { ...item, sessionPin: null })).toBe(false);
+    expect(toPutBody({ ...item, sessionPin: null }).combo.sessionPin).toBeNull();
+    expect(Object.hasOwn(toPutBody({ ...item, strategy: "failover" }).combo, "sessionPin")).toBe(false);
+    for (const ttlMs of [0, 59_999, 86_400_001, NaN, 60_000.5]) {
+      expect(validateComboDraft({ ...item, sessionPin: { ttlMs } }, {
+        existingIds: [], isCreate: false, providers: providerMap,
+      })).toBe("invalidSessionPin");
+    }
+    for (const ttlMs of [60_000, 86_400_000]) {
+      expect(validateComboDraft({ ...item, sessionPin: { ttlMs } }, {
+        existingIds: [], isCreate: false, providers: providerMap,
+      })).toBeNull();
+    }
+  });
+
   test("GUI timeout bounds and default are the server constants", () => {
     expect(JEV_DECISION_TIMEOUT_MIN_MS).toBe(SERVER_TIMEOUT_MIN_MS);
     expect(JEV_DECISION_TIMEOUT_MAX_MS).toBe(SERVER_TIMEOUT_MAX_MS);

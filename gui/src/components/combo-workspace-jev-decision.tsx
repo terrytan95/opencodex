@@ -1,3 +1,5 @@
+import { ComboSessionPin } from "./combo-session-pin";
+import type { JevSessionPinConfig } from "../../../src/combos/jev-session-pin-config";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { JEV_DECISION_ISSUE_LABEL_KEYS, jevDecisionServiceOptions } from "../combo-workspace-data";
 import { type TKey, useT } from "../i18n/shared";
@@ -16,6 +18,7 @@ export type JevDecisionPatch = {
   decisionProvider?: string | null;
   decisionModel?: string | null;
   decisionTimeoutMs?: number | null;
+  sessionPin?: JevSessionPinConfig | null;
 };
 
 type DecisionTestResult =
@@ -46,6 +49,7 @@ export function ComboJevDecisionSection({
   decisionProvider,
   decisionModel,
   decisionTimeoutMs,
+  sessionPin,
   disabled,
   onChange,
 }: {
@@ -59,6 +63,7 @@ export function ComboJevDecisionSection({
   decisionProvider: string | null;
   decisionModel: string | null;
   decisionTimeoutMs: number | null;
+  sessionPin?: JevSessionPinConfig | null;
   disabled?: boolean;
   onChange: (patch: JevDecisionPatch) => void;
 }) {
@@ -270,6 +275,9 @@ export function ComboJevDecisionSection({
           })}
         </p>
       </div>
+
+      <ComboSessionPin value={sessionPin ?? null} disabled={disabled}
+        onChange={(value) => onChange({ sessionPin: value })} />
 
       <div className="cwi-jev-decision-test" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
         <button

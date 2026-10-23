@@ -6,6 +6,10 @@ import type { TKey } from "./en";
  * French i18n catalog. Must match the `TKey` set.
  */
 export const fr: Record<TKey, string> = {
+  "cws.jev.sessionPin": "Conserver le modèle de la session",
+  "cws.jev.sessionPinHint": "Garde le modèle choisi entre les échanges.",
+  "cws.jev.sessionPinMinutes": "Délai d’inactivité (minutes)",
+  "cws.err.invalidSessionPin": "Saisissez un délai de 1 à 1440 minutes.",
   "pws.completion.title": "Test de réponse du modèle",
   "pws.completion.model": "Modèle à tester",
   "pws.completion.choose": "Choisir un modèle",

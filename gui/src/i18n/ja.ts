@@ -6,6 +6,10 @@ import type { TKey } from "./en";
  * Japanese i18n catalog; must match the `TKey` set (compile-checked).
  */
 export const ja: Record<TKey, string> = {
+  "cws.jev.sessionPin": "セッションのモデルを固定",
+  "cws.jev.sessionPinHint": "会話の続きも選択済みモデルを使います。",
+  "cws.jev.sessionPinMinutes": "待機時間（分）",
+  "cws.err.invalidSessionPin": "1〜1440分の待機時間を入力してください。",
   "pws.completion.title": "モデル応答テスト",
   "pws.completion.model": "テストするモデル",
   "pws.completion.choose": "モデルを選択",

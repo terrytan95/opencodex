@@ -106,7 +106,7 @@ export function DetailPanel({
   const [copied, setCopied] = useState(false);
   const dirty = !draftEquals(draft, baseline);
   const allTargetsExhausted = comboQuotaState(draft.targets, providerQuotaStates, providerMap) === "exhausted";
-  const baselineSyncKey = JSON.stringify([baseline.id, baseline.alias, baseline.nativeAlias, baseline.displayName, baseline.strategy, baseline.stickyLimit, baseline.defaultEffort, baseline.imageInput, baseline.reasoningEffortMode, baseline.decisionProvider, baseline.decisionModel, baseline.decisionTimeoutMs, baseline.targets.map(t => [t.provider, t.model, t.weight, t.reasoningEfforts, t.modelProfile])]);
+  const baselineSyncKey = JSON.stringify([baseline.id, baseline.alias, baseline.nativeAlias, baseline.displayName, baseline.strategy, baseline.stickyLimit, baseline.defaultEffort, baseline.imageInput, baseline.reasoningEffortMode, baseline.decisionProvider, baseline.decisionModel, baseline.decisionTimeoutMs, baseline.sessionPin?.ttlMs, baseline.targets.map(t => [t.provider, t.model, t.weight, t.reasoningEfforts, t.modelProfile])]);
   const effortMap = useMemo(() => {
     const map = new Map<string, string[] | undefined>();
     for (const model of capabilityModels) {
@@ -358,6 +358,7 @@ export function DetailPanel({
                 decisionProvider={draft.decisionProvider ?? null}
                 decisionModel={draft.decisionModel ?? null}
                 decisionTimeoutMs={draft.decisionTimeoutMs ?? null}
+                sessionPin={draft.sessionPin ?? null}
                 disabled={busy}
                 onChange={(patch) => updateDraft((d) => ({ ...d, ...patch }))}
               />

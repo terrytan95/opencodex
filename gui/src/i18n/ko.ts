@@ -6,6 +6,10 @@ import type { TKey } from "./en";
  * Korean i18n catalog; must match the `TKey` set (compile-checked).
  */
 export const ko: Record<TKey, string> = {
+  "cws.jev.sessionPin": "세션 모델 유지",
+  "cws.jev.sessionPinHint": "다음 대화에서도 선택한 모델을 사용합니다.",
+  "cws.jev.sessionPinMinutes": "유휴 시간 제한(분)",
+  "cws.err.invalidSessionPin": "1~1440분의 유휴 시간 제한을 입력하세요.",
   "pws.completion.title": "모델 응답 테스트",
   "pws.completion.model": "테스트할 모델",
   "pws.completion.choose": "모델 선택",

@@ -8,6 +8,10 @@ import type { TKey } from "./en";
  * Technical terms and model identifiers intentionally remain English.
  */
 export const vi: Record<TKey, string> = {
+  "cws.jev.sessionPin": "Giữ mô hình cho phiên",
+  "cws.jev.sessionPinHint": "Giữ mô hình đã chọn giữa các lượt.",
+  "cws.jev.sessionPinMinutes": "Thời gian chờ (phút)",
+  "cws.err.invalidSessionPin": "Nhập thời gian chờ từ 1 đến 1440 phút.",
   "pws.completion.title": "Kiểm tra phản hồi mô hình",
   "pws.completion.model": "Mô hình cần kiểm tra",
   "pws.completion.choose": "Chọn mô hình",

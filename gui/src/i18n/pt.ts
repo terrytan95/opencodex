@@ -8,6 +8,10 @@ import type { TKey } from "./en";
  * Technical terms and model identifiers intentionally remain English.
  */
 export const pt: Record<TKey, string> = {
+  "cws.jev.sessionPin": "Manter o modelo da sessão",
+  "cws.jev.sessionPinHint": "Mantém o modelo escolhido entre mensagens.",
+  "cws.jev.sessionPinMinutes": "Tempo ocioso (minutos)",
+  "cws.err.invalidSessionPin": "Informe um tempo ocioso de 1 a 1440 minutos.",
   "pws.completion.title": "Teste de resposta do modelo",
   "pws.completion.model": "Modelo a testar",
   "pws.completion.choose": "Escolha um modelo",

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Window } from "happy-dom";
-import { act } from "react";
+import { act, useState } from "react";
+import { ComboSessionPin } from "../src/components/combo-session-pin";
+import type { JevSessionPinConfig } from "../../src/combos/jev-session-pin-config";
 import type { Root } from "react-dom/client";
 import { jevAutoCreateHash } from "../src/app-routing";
 import ComboWorkspace from "../src/components/ComboWorkspace";
@@ -429,4 +431,32 @@ test("the model method saves an opencodex route and refuses this combo's own sel
   expect(saved).toHaveLength(count);
   expect(host.querySelector(".notice-err")?.textContent)
     .toBe("Choose a decision model opencodex can route. It cannot be this combo or another JEV combo.");
+});
+
+
+test("session pin switch reveals a labelled duration and preserves draft edits", async () => {
+  const { createRoot } = await import("react-dom/client");
+  const host = document.createElement("div");
+  document.body.append(host);
+  const changes: Array<JevSessionPinConfig | null> = [];
+  function Harness() {
+    const [value, setValue] = useState<JevSessionPinConfig | null>(null);
+    return <ComboSessionPin value={value} onChange={next => { changes.push(next); setValue(next); }} />;
+  }
+  root = createRoot(host);
+  await act(async () => { root!.render(<LanguageProvider><Harness /></LanguageProvider>); });
+  const toggle = host.querySelector<HTMLButtonElement>('button[aria-label="Keep session on one model"]')!;
+  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  expect(host.querySelector("input")).toBeNull();
+  await act(async () => { toggle.click(); });
+  expect(changes.at(-1)).toEqual({ ttlMs: 1_200_000 });
+  const input = host.querySelector<HTMLInputElement>("input")!;
+  expect(host.querySelector(`label[for="${input.id}"]`)?.textContent).toBe("Idle timeout (minutes)");
+  await act(async () => { setInput(input, "45"); });
+  expect(changes.at(-1)).toEqual({ ttlMs: 2_700_000 });
+  await act(async () => { setInput(input, ""); });
+  expect(changes.at(-1)).toEqual({ ttlMs: 0 });
+  await act(async () => { toggle.click(); });
+  expect(changes.at(-1)).toBeNull();
+  expect(host.querySelector("input")).toBeNull();
 });

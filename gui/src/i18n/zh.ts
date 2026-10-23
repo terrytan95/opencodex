@@ -6,6 +6,10 @@ import type { TKey } from "./en";
  * Chinese i18n catalog; must match the `TKey` set (compile-checked).
  */
 export const zh: Record<TKey, string> = {
+  "cws.jev.sessionPin": "保持会话模型",
+  "cws.jev.sessionPinHint": "连续对话沿用已选模型。",
+  "cws.jev.sessionPinMinutes": "空闲超时（分钟）",
+  "cws.err.invalidSessionPin": "请输入 1 到 1440 分钟的空闲超时。",
   "pws.completion.title": "模型响应测试",
   "pws.completion.model": "要测试的模型",
   "pws.completion.choose": "选择模型",

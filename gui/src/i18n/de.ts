@@ -7,6 +7,10 @@ import type { TKey } from "./en";
  * German i18n catalog, generated from en.ts. Must match the `TKey` set (compile-checked).
  */
 export const de: Record<TKey, string> = {
+  "cws.jev.sessionPin": "Sitzungsmodell beibehalten",
+  "cws.jev.sessionPinHint": "Behält das gewählte Modell zwischen Nachrichten.",
+  "cws.jev.sessionPinMinutes": "Leerlaufzeit (Minuten)",
+  "cws.err.invalidSessionPin": "Eine Leerlaufzeit von 1 bis 1440 Minuten eingeben.",
   "pws.completion.title": "Modellantwort testen",
   "pws.completion.model": "Zu testendes Modell",
   "pws.completion.choose": "Modell auswählen",

@@ -7,6 +7,10 @@ import type { TKey } from "./en";
  * Turkish i18n catalog. Must match the `TKey` set (compile-checked).
  */
 export const tr: Record<TKey, string> = {
+  "cws.jev.sessionPin": "Oturum modelini koru",
+  "cws.jev.sessionPinHint": "İletiler arasında seçilen modeli korur.",
+  "cws.jev.sessionPinMinutes": "Boşta kalma süresi (dakika)",
+  "cws.err.invalidSessionPin": "1 ile 1440 dakika arasında süre girin.",
   "pws.completion.title": "Model yanıt testi",
   "pws.completion.model": "Test edilecek model",
   "pws.completion.choose": "Bir model seçin",

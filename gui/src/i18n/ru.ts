@@ -6,6 +6,10 @@ import type { TKey } from "./en";
  * Russian i18n catalog; must match the `TKey` set (compile-checked).
  */
 export const ru: Record<TKey, string> = {
+  "cws.jev.sessionPin": "Сохранять модель сеанса",
+  "cws.jev.sessionPinHint": "Сохраняет выбранную модель между сообщениями.",
+  "cws.jev.sessionPinMinutes": "Время простоя (минуты)",
+  "cws.err.invalidSessionPin": "Введите время простоя от 1 до 1440 минут.",
   "pws.completion.title": "Проверка ответа модели",
   "pws.completion.model": "Модель для проверки",
   "pws.completion.choose": "Выберите модель",

@@ -274,6 +274,10 @@ quota settings. No new editor controls or background quota work are enabled.
 
 ### Session pin for JEV
 
+In a JEV Combo’s **Decision method** section, turn on **Keep session on one model**
+and choose an idle timeout from 1 to 1440 minutes. Save to apply; turning it off
+and saving clears the pin setting. New sessions use the existing JEV decision flow.
+
 A JEV Combo decides a target for every request, so consecutive turns of one conversation can move
 between providers, and each move starts with a cold provider prompt cache. `sessionPin` is an
 opt-in setting per JEV Combo, off by default, that keeps a client session on the target JEV chose
