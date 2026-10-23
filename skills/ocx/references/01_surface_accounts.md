@@ -245,7 +245,7 @@ State-changing: yes. JSON mode: `envelope`.
 
 ### `ocx account strategy`
 
-Usage: `ocx account strategy <provider> [quota|round-robin|fill-first|least-loaded|reset-first|quota-pace] [--json]`
+Usage: `ocx account strategy <provider> [quota|round-robin|fill-first|least-loaded|reset-first] [--json]`
 
 Show or set how an account pool picks the next account.
 

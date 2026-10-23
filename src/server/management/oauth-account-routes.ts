@@ -674,7 +674,7 @@ export async function handleOauthAccountRoutes(ctx: ManagementContext): Promise<
         : parseAccountPoolStrategy(fields.strategy);
       if (parsed === null) return jsonResponse({ error: kind === "anthropic"
         ? "strategy must be one of: quota, round-robin, fill-first"
-        : `strategy must be one of: quota, round-robin, fill-first, reset-first${kind === "codex" ? ", quota-pace" : ""}${kind === "generic" && provider === "kiro" ? ", least-loaded" : ""}` }, 400);
+        : `strategy must be one of: quota, round-robin, fill-first, reset-first${kind === "generic" && provider === "kiro" ? ", least-loaded" : ""}` }, 400);
       strategy = parsed;
     }
     let stickyLimit: number | undefined;

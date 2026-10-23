@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { useState } from "react";
 import { formatAccountPauseTooltip } from "../account-pause-display";
 import { useT, useI18n } from "../i18n/shared";
 import { useCopyFeedback } from "./use-copy-feedback";
@@ -23,10 +23,7 @@ import {
   oauthHealthShowsReauth,
 } from "../oauth-health-display";
 
-const CodexQuotaPace = lazy(() => import("./CodexQuotaPace"));
-
 export function CodexAccountPoolCards({
-  apiBase = "",
   pool,
   creditsVisible,
   loading = false,
@@ -54,7 +51,6 @@ export function CodexAccountPoolCards({
   onCopyDoctor,
   doctorCopyOutcomeFor,
 }: {
-  apiBase?: string;
   pool: CodexAccountEntry[];
   creditsVisible?: boolean;
   loading?: boolean;
@@ -258,7 +254,6 @@ export function CodexAccountPoolCards({
                   pending={a.quota == null && (loading || !showCredits)}
                   afterWeekly={showCredits && !loading ? <CodexCreditsRow credits={a.credits} t={t} locale={locale} /> : undefined}
                 />
-                <Suspense fallback={null}><CodexQuotaPace apiBase={apiBase} accountId={a.id} quota={a.quota} plan={a.plan} /></Suspense>
               </>}
         </div>
         );

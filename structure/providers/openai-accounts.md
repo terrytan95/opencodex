@@ -1,9 +1,9 @@
 # OpenAI Account Identity And Pool Operations
 
-How OpenAI accounts are migrated, identified, and rotated once the account modes in
-[OpenAI provider account modes](openai-tiers.md) are configured: wire identity, store concurrency,
-pool plan exclusions and ordering, quota observations, and account-bound thread and file
-retention.
+How OpenAI accounts are migrated, identified, and rotated under the
+[OpenAI provider account modes](openai-tiers.md): identity, concurrency, ordering,
+quota observations, and account-bound thread/file retention. Stored `quota-pace`
+settings fall back to `quota`; management writes reject the removed strategy.
 
 ## Migration and restore
 

@@ -991,34 +991,3 @@ OpenCodex refuses those ambiguous settings. It also refuses an
 unsafe target or a row edited since apply. The integration is loopback only and
 never copies provider credentials. Factory documents the [BYOK schema](https://docs.factory.ai/model-independence/byok)
 and [personal settings path](https://docs.factory.ai/droid-cli/settings).
-
-
-## Scenarios
-
-In **Connect → Scenarios**, name the current setup and select the clients to save. A scenario
-captures default model selectors and supported effort settings for existing Codex, Claude Code
-and OpenCode configurations. It saves no credentials, endpoints, permissions or complete files.
-An existing Combo or Routing Profile selector is saved like any model name.
-
-Choose **Preview** to inspect differences. Close the selected clients, then **Apply changes**
-and reopen them. New sessions use these defaults. Project settings, launch arguments and environment overrides may
-still take precedence. An edited file requires a new preview. Each client reports its own result;
-a partial failure is not an automatic rollback. Remove deletes only the saved scenario.
-
-Codex preserves TOML comments. JSON clients preserve unrelated values and use their existing
-indentation. Missing, symlinked, malformed or unsupported configuration files are unavailable;
-no client files are created and JSONC comments are not discarded. Grok and other clients are not
-included in this initial snapshot format.
-
-
-## MCP and Skills inventory
-
-**Connect → MCP & Skills** lists supported global configuration sources for Codex, Claude Code,
-Grok and OpenCode. Search by name, client or path; **Needs attention** filters duplicate names,
-broken links and unreadable entries. Expand **Source** to see the installation location.
-
-The scan is read-only and never runs a server, installs a skill or contacts a provider. It lists
-metadata rather than MCP arguments, environment values or prompt text. **Scanned locations** shows
-what was inspected and what could not be read; project files, DSH and plugin-specific sources are
-not included. A partial badge means a source failed or a scan limit was reached. Results are cached
-for 30 seconds. Installed versions appear only when declared locally; update status remains unknown.

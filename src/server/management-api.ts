@@ -1,5 +1,3 @@
-import { handleAssetInventoryRoutes } from "./management/asset-inventory-routes";
-import { handleScenarioRoutes } from "./management/scenario-routes";
 import { remoteWorkspaceEnabled } from "../remote-control/workspace-activation";
 import { randomUUID } from "node:crypto";
 import type { CatalogModel } from "../codex/catalog";
@@ -363,8 +361,6 @@ export async function handleManagementAPI(
     ??     (await handleConfigRoutes(ctx))
     ??     (await handleNativeReasoningRetentionRoutes(ctx))
     ??     (await handleStorageLogGuardRoutes(ctx))
-    ??     (await handleAssetInventoryRoutes(ctx))
-    ??     (await handleScenarioRoutes(ctx))
     ??     (await handleLogsUsageRoutes(ctx))
     ??     (await handleRequestHistoryRoutes(ctx))
     ??     (await handleQuotaResetRoutesOnDemand(ctx))

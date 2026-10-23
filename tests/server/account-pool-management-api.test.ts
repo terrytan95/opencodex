@@ -62,7 +62,7 @@ describe("Codex account pool strategy management API", () => {
   });
 
   test("PUT /api/codex-auth/pool-strategy rejects invalid strategy", async () => {
-    for (const bad of ["weighted", "", 1, null, "Quota"]) {
+    for (const bad of ["weighted", "quota-pace", "", 1, null, "Quota"]) {
       const req = new Request("http://localhost/api/codex-auth/pool-strategy", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -767,12 +767,6 @@ describe("unified pool-settings contract (#695 wp5c)", () => {
       const write = async (provider: string, strategy: string) => fetch(new URL("/api/pool/settings", server.url), {
         method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider, strategy }),
       });
-      const pace = await write("openai", "quota-pace");
-      expect(pace.status).toBe(200);
-      expect(await pace.json()).toMatchObject({ kind: "codex", strategy: "quota-pace" });
-      expect(loadConfig().accountPoolStrategy).toBe("quota-pace");
-      expect((await write("anthropic", "quota-pace")).status).toBe(400);
-      expect((await write("google-antigravity", "quota-pace")).status).toBe(400);
       const result = await write("openai", "reset-first");
       expect(result.status).toBe(200);
       expect(await result.json()).toMatchObject({ kind: "codex", strategy: "reset-first" });
