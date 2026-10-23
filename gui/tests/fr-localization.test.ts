@@ -26,6 +26,12 @@ function carriesTranslatableWords(value: string): boolean {
 }
 
 const INTENTIONAL_ENGLISH = new Set<TKey>([
+  "nav.antigravity", // Product name, like Codex and Claude.
+  // These standalone French labels have the same spelling as English.
+  "rules.action",
+  "context.instructions",
+  "context.conversation",
+  "context.session",
   "nav.claude", // Product name.
   "nav.codexSet", // Product name: the sidebar row reads "Codex" in every locale.
   // The vendor name, and the Pool 2 label that de and pt also keep: "pool" is the French UI term here.

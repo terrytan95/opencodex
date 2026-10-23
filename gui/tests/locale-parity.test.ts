@@ -41,6 +41,7 @@ function carriesTranslatableWords(value: string): boolean {
 // gap. Anything *not* on this list that ships an English-identical value is treated as a stale
 // placeholder and fails the build.
 const ZH_TW_KEEP_ENGLISH: ReadonlySet<string> = new Set([
+  "nav.antigravity", // Product name, like Codex and Claude.
   // The Codex sidebar row is the product name, kept in every locale like Claude.
   "nav.codexSet",
   // The primary Anthropic pool is labelled by the vendor name alone, kept in every locale.
