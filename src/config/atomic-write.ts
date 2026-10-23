@@ -414,8 +414,8 @@ export function atomicWriteFileNoFollow(
  * backup, which a pre-registration install may have left deliberately unclaimed; claiming it
  * here would let a later uninstall delete recovery data it never owned.
  */
-export function atomicWriteFileNoFollowUnclaimed(path: string, content: string): void {
-  atomicWriteFileToTarget(path, content, join(resolveWriteTarget(dirname(path)), basename(path)), undefined, {}, false);
+export function atomicWriteFileNoFollowUnclaimed(path: string, content: string, hooks: AtomicWriteHooks = {}): void {
+  atomicWriteFileToTarget(path, content, join(resolveWriteTarget(dirname(path)), basename(path)), undefined, hooks, false);
 }
 
 export interface AtomicWriteAsyncIO {

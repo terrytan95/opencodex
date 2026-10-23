@@ -123,6 +123,7 @@ export const DASHBOARD_UPDATE_HASH = "dashboard/update";
  * here or App normalization strips it before Claude can read it.
  */
 export const INTEGRATION_TAB_HASHES = [
+  "integrations/scenarios",
   "integrations/keys",
   "integrations/codex",
   "integrations/claude",

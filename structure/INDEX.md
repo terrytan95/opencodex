@@ -125,6 +125,7 @@ The dashboard, the management API, and third-party client config ownership.
 | [`companion.md`](companion.md) | Shared timeline filtering, usage/quotas, native and web tray title, and WidgetKit display contracts. |
 | [`codex-account-controls.md`](codex-account-controls.md) | Account selection order, custom usage thresholds, and stable account-card editing. |
 | [`context-inspector.md`](context-inspector.md) | Opt-in bounded request composition and in-memory context diagnostics. |
+| [`workspace-scenarios.md`](workspace-scenarios.md) | Credential-free model-default snapshots and preview-bound client configuration changes. |
 
 ### Tier 6 — Operations and process
 
@@ -229,6 +230,7 @@ A source area can be described by more than one doc, because these docs are orga
 | `src/config.ts` | [`overview.md`](overview.md)<br>[`runtime.md`](runtime.md)<br>[`config.md`](config.md)<br>[`providers/openai-accounts.md`](providers/openai-accounts.md) |
 | `src/config/` | [`runtime.md`](runtime.md)<br>[`config.md`](config.md)<br>[`transports/native-reasoning-retention.md`](transports/native-reasoning-retention.md)<br>[`fallback-policy.md`](fallback-policy.md) |
 | `src/config/account-auto-pause-revisions.ts` | [`account-auto-pause.md`](account-auto-pause.md) |
+| `src/config/atomic-write.ts` | [`workspace-scenarios.md`](workspace-scenarios.md) |
 | `src/config/live-reconcile.ts` | [`pricing.md`](pricing.md) |
 | `src/config/persisted-mutation.ts` | [`runtime.md`](runtime.md) |
 | `src/config/schema/account-auto-pause.ts` | [`account-auto-pause.md`](account-auto-pause.md) |
@@ -239,6 +241,8 @@ A source area can be described by more than one doc, because these docs are orga
 | `src/images/` | [`runtime.md`](runtime.md)<br>[`transports/inventory.md`](transports/inventory.md)<br>[`providers/anthropic-progress.md`](providers/anthropic-progress.md) |
 | `src/index.ts` | [`runtime.md`](runtime.md) |
 | `src/integrations/` | [`clients/integrations.md`](clients/integrations.md)<br>[`clients/qoder.md`](clients/qoder.md) |
+| `src/integrations/scenario-clients.ts` | [`workspace-scenarios.md`](workspace-scenarios.md) |
+| `src/integrations/scenarios.ts` | [`workspace-scenarios.md`](workspace-scenarios.md) |
 | `src/lab/` | [`runtime.md`](runtime.md)<br>[`adapters/compatibility-lab.md`](adapters/compatibility-lab.md) |
 | `src/lib/` | [`overview.md`](overview.md)<br>[`runtime.md`](runtime.md)<br>[`transports/byte-accounting.md`](transports/byte-accounting.md)<br>[`transports/responses-wire-shapes.md`](transports/responses-wire-shapes.md)<br>[`transports/responses-failover.md`](transports/responses-failover.md)<br>[`transports/responses-spend.md`](transports/responses-spend.md)<br>[`transports/inventory.md`](transports/inventory.md)<br>[`gui-and-management-api.md`](gui-and-management-api.md)<br>[`dashboard-and-usage.md`](dashboard-and-usage.md)<br>[`clients/integrations.md`](clients/integrations.md)<br>[`ops/service-and-sidecars.md`](ops/service-and-sidecars.md)<br>[`ops/docs-and-release.md`](ops/docs-and-release.md) |
 | `src/lib/account-auto-pause-response.ts` | [`account-auto-pause.md`](account-auto-pause.md) |
@@ -304,6 +308,7 @@ A source area can be described by more than one doc, because these docs are orga
 | `src/server/management/model-routes.ts` | [`pricing.md`](pricing.md) |
 | `src/server/management/quota-pool-routes.ts` | [`quota-pool.md`](quota-pool.md) |
 | `src/server/management/routing-profile-routes.ts` | [`routing-rules.md`](routing-rules.md) |
+| `src/server/management/scenario-routes.ts` | [`workspace-scenarios.md`](workspace-scenarios.md) |
 | `src/server/request-log.ts` | [`context-inspector.md`](context-inspector.md) |
 | `src/server/responses/account-auto-pause-recovery.ts` | [`account-auto-pause.md`](account-auto-pause.md) |
 | `src/server/responses/advisor-plan-slot.ts` | [`advisor.md`](advisor.md) |
