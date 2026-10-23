@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { decodeServerSentEvents } from "../../src/lib/sse-decoder";
 import {
   TRANSLATOR_MAX_SSE_EVENT_BYTES,
@@ -41,6 +41,23 @@ async function collectWithComments(chunks: string[]) {
 }
 
 describe("text/event-stream decoder", () => {
+  test("large fragmented lines inspect only a bounded field prefix", async () => {
+    const payload = "x".repeat(1024 * 1024);
+    const chunks = ["data: ", ...Array.from({ length: payload.length / 1024 }, () => "x".repeat(1024)), "\n\n"];
+    const slice = String.prototype.slice;
+    let inspectedPrefixSource = 0;
+    const probe = spyOn(String.prototype, "slice").mockImplementation(function(this: string, start, end) {
+      if (start === 0 && end === 6) inspectedPrefixSource += this.length;
+      return slice.call(this, start, end);
+    });
+    try {
+      expect(await collect(chunks)).toEqual([{ data: payload }]);
+      expect(inspectedPrefixSource).toBeLessThan(payload.length * 2);
+    } finally { probe.mockRestore(); }
+    expect(await collect(["da", "ta:", " value\r\n", "event: next\r\n\r\n", "data: final\n\n"]))
+      .toEqual([{ event: "next", data: "value" }, { data: "final" }]);
+  });
+
   test("preserves event state across arbitrary reader chunks", async () => {
     expect(await collect([
       "event: content_",
