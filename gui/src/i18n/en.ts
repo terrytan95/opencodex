@@ -1,3 +1,4 @@
+import { uptimeCopy } from "./uptime-copy";
 import { desktopCompatibilityCopy } from "./desktop-compatibility-copy";
 // English — source of truth. Its keys define the TKey type; de/fr/ko/zh/zh-TW/ru/ja/tr must match (compile-checked).
 // Strings with {cmd} render a <code> chip via <Trans>; {var} are plain interpolations.
@@ -168,10 +169,7 @@ export const en = {
   "codexAuth.quotaAutoRefreshPartial": "Some settings could not be saved. Retry to finish the same change.",
   // sidebar / nav / common
   "nav.dashboard": "Dashboard",
-  "uptime.day": "d",
-  "uptime.hour": "h",
-  "uptime.minute": "m",
-  "uptime.second": "s",
+  ...uptimeCopy("en"),
   "nav.startup": "Startup",
   "nav.providers": "Providers",
   "nav.models": "Models",

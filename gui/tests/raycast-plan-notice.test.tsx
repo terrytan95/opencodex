@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { DICTS, I18nContext, type TFn } from "../src/i18n/shared";
+import { DICTS } from "./helpers/i18n-catalogs";
+import { I18nContext, type TFn } from "../src/i18n/shared";
 import RaycastPlanNotice from "../src/pages/integrations/RaycastPlanNotice";
 import type { RaycastInstall } from "../src/pages/integrations/integration-api";
 

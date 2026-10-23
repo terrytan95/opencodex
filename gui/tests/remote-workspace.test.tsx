@@ -14,7 +14,7 @@ test("#remote resolves to the Remote Link page", () => {
 });
 
 test("Remote Workspace route gates unavailable deep links and mounts when available", async () => {
-  const [{ RemoteWorkspaceRoute }, { act }, { createRoot }, { LanguageProvider }] = await Promise.all([
+  const [{ RemoteWorkspaceRoute }, { act, Suspense }, { createRoot }, { LanguageProvider }] = await Promise.all([
     import("../src/App"), import("react"), import("react-dom/client"), import("../src/i18n/provider"),
   ]);
   const host = win.document.createElement("div") as unknown as HTMLElement;
@@ -23,7 +23,7 @@ test("Remote Workspace route gates unavailable deep links and mounts when availa
   Object.defineProperty(globalThis, "fetch", { configurable: true, value: async () => jsonResponse({ available: false, devices: [], runtimes: {}, sessions: [] }) });
   await act(async () => {
     root = createRoot(host);
-    root.render(<LanguageProvider><RemoteWorkspaceRoute available={false} apiBase="" hubOrigin="https://hub.example.test" onOpenRemoteLink={() => { navigated = true; }} /></LanguageProvider>);
+    root.render(<LanguageProvider><Suspense fallback={null}><RemoteWorkspaceRoute available={false} apiBase="" hubOrigin="https://hub.example.test" onOpenRemoteLink={() => { navigated = true; }} /></Suspense></LanguageProvider>);
   });
   expect(host.textContent).toContain("Remote Workspace is unavailable");
   expect(host.querySelector("button.link-btn")?.textContent).toBe("Remote Link");
@@ -32,10 +32,13 @@ test("Remote Workspace route gates unavailable deep links and mounts when availa
   expect(navigated).toBe(true);
   Object.defineProperty(globalThis, "fetch", { configurable: true, value: async () => jsonResponse({ available: true, devices: [], runtimes: {}, sessions: [] }) });
   await act(async () => {
-    root?.render(<LanguageProvider><RemoteWorkspaceRoute available apiBase="" hubOrigin="https://hub.example.test" onOpenRemoteLink={() => { navigated = true; }} /></LanguageProvider>);
+    root?.render(<LanguageProvider><Suspense fallback={null}><RemoteWorkspaceRoute available apiBase="" hubOrigin="https://hub.example.test" onOpenRemoteLink={() => { navigated = true; }} /></Suspense></LanguageProvider>);
     await Promise.resolve();
     await Promise.resolve();
   });
+  for (let tries = 0; tries < 100 && !host.querySelector(".remote-workspace-page"); tries++) {
+    await act(async () => { await Bun.sleep(10); });
+  }
   expect(host.querySelector(".remote-workspace-page")).not.toBeNull();
 });
 

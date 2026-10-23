@@ -75,7 +75,7 @@ test("the three opaque provider-header controls now carry visible meaning", asyn
 });
 
 test("no new i18n key was invented: every string used already exists in all locales", async () => {
-  const { DICTS } = await import("../src/i18n/shared");
+  const { DICTS } = await import("./helpers/i18n-catalogs");
   const keys = ["models.useDefaultAliases", "models.customAdd", "models.contextCapLabel"] as const;
   for (const [locale, dict] of Object.entries(DICTS)) {
     for (const key of keys) {

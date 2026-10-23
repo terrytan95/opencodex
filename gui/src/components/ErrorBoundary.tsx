@@ -7,6 +7,7 @@ interface ErrorBoundaryProps {
   message: string;
   detailsLabel: string;
   reloadLabel: string;
+  onReload?: () => void;
 }
 
 interface ErrorBoundaryState {
@@ -23,6 +24,7 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
   }
 
   private reload = () => {
+    if (this.props.onReload) return this.props.onReload();
     this.setState({ error: null });
   };
 

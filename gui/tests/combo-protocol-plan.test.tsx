@@ -6,7 +6,7 @@ import { planProtocol } from "../../src/protocols/plan";
 import { FEATURE_SOURCES, PROTOCOL_FEATURES } from "../../src/protocols/features";
 import { ComboProtocolPlan } from "../src/components/protocols/ComboProtocolPlan";
 import { LanguageProvider } from "../src/i18n/provider";
-import { DICTS } from "../src/i18n/shared";
+import { DICTS } from "./helpers/i18n-catalogs";
 import { clearProtocolPlanCache } from "../src/protocol-api";
 
 const globals = ["document", "window", "navigator", "localStorage", "IS_REACT_ACT_ENVIRONMENT"] as const;

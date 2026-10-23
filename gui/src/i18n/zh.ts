@@ -1,3 +1,4 @@
+import { uptimeCopy } from "./uptime-copy";
 import { desktopCompatibilityCopy } from "./desktop-compatibility-copy";
 import type { TKey } from "./en";
 
@@ -166,10 +167,7 @@ export const zh: Record<TKey, string> = {
   "codexAuth.quotaAutoRefreshPartial": "部分设置未能保存。重试将完成同一项更改。",
   // sidebar / nav / common
   "nav.dashboard": "仪表盘",
-  "uptime.day": "天",
-  "uptime.hour": "小时",
-  "uptime.minute": "分钟",
-  "uptime.second": "秒",
+  ...uptimeCopy("zh"),
   "nav.startup": "启动安全",
   "nav.providers": "提供方",
   "nav.models": "模型",

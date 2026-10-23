@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Window } from "happy-dom";
-import { act } from "react";
+import { act, lazy, Suspense } from "react";
 import type { Root } from "react-dom/client";
 import ErrorBoundary from "../src/components/ErrorBoundary";
 
@@ -18,6 +18,26 @@ beforeEach(() => {
   });
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
     .IS_REACT_ACT_ENVIRONMENT = true;
+});
+
+test("a rejected page import offers a document reload instead of retrying a rejected lazy object", async () => {
+  const { createRoot } = await import("react-dom/client");
+  const container = document.createElement("div");
+  let reloads = 0;
+  const Page = lazy(async () => { throw new Error("page download failed"); });
+  const root = createRoot(container);
+  await act(async () => {
+    root.render(
+      <ErrorBoundary pageName="Models" title="Failed" message="Retry" detailsLabel="Error"
+        reloadLabel="Reload" onReload={() => { reloads += 1; }}>
+        <Suspense fallback={null}><Page /></Suspense>
+      </ErrorBoundary>,
+    );
+  });
+  expect(container.textContent).toContain("page download failed");
+  await act(async () => { container.querySelector<HTMLButtonElement>("button")!.click(); });
+  expect(reloads).toBe(1);
+  await act(async () => root.unmount());
 });
 
 afterEach(() => {

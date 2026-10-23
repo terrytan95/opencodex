@@ -5,7 +5,7 @@ import { isSubscriptionCliProvider } from "../../gui/src/provider-workspace/subs
 import { authModeLabel } from "../../gui/src/components/provider-workspace/ProviderRail";
 import { providerAuthSurface } from "../../gui/src/provider-workspace/auth";
 import { en } from "../../gui/src/i18n/en";
-import { DICTS } from "../../gui/src/i18n/catalogs";
+import { DICTS } from "../../gui/tests/helpers/i18n-catalogs";
 import { interpolate, type TFn } from "../../gui/src/i18n/shared";
 
 /**

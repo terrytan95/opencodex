@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeAll, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -7,6 +7,9 @@ import { en } from "../src/i18n/en";
 import { ko } from "../src/i18n/ko";
 import { LanguageProvider } from "../src/i18n/provider";
 import { getActiveLocale, setActiveLocale, type Locale } from "../src/i18n/shared";
+
+import { loadCatalog } from "../src/i18n/catalogs";
+beforeAll(() => loadCatalog("ko"));
 
 const globals = ["document", "window", "navigator", "localStorage", "IS_REACT_ACT_ENVIRONMENT"] as const;
 const modes: ThemeMode[] = ["light", "dark", "system"];

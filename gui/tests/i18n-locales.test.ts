@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import {
-  DICTS,
-  LOCALES,
-  localeDisplayName,
-  detectInitial,
-} from "../src/i18n/shared";
+import { DICTS } from "./helpers/i18n-catalogs";
+import { LOCALES, localeDisplayName, detectInitial } from "../src/i18n/shared";
 import { en } from "../src/i18n/en";
 import { formatUptime } from "../src/formatUptime";
 

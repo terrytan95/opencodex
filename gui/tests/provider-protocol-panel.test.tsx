@@ -6,7 +6,7 @@ import type { ProtocolProviderSummaryV1 } from "../../src/protocols/dto";
 import { ProviderProtocolPanel } from "../src/components/provider-workspace/ProviderProtocolPanel";
 import ProviderSettings from "../src/components/provider-workspace/ProviderSettings";
 import { LanguageProvider } from "../src/i18n/provider";
-import { DICTS } from "../src/i18n/shared";
+import { DICTS } from "./helpers/i18n-catalogs";
 import { fetchProtocolProviderSummary } from "../src/protocol-api";
 
 const globals = ["document", "window", "navigator", "localStorage", "IS_REACT_ACT_ENVIRONMENT"] as const;

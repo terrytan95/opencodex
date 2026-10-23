@@ -1,7 +1,8 @@
 import { test, expect } from "bun:test";
 import { NATIVE_MAIN_EN, NATIVE_MAIN_TRANSLATIONS } from "../src/i18n/native-main-translations";
 import { nativeMainTranslator } from "../src/i18n/native-main-copy";
-import { DICTS, type Locale } from "../src/i18n/catalogs";
+import { DICTS } from "./helpers/i18n-catalogs";
+import { type Locale } from "../src/i18n/catalogs";
 
 test("native-main English guidance names the server, checkbox, result and manual retry", () => {
   expect(NATIVE_MAIN_EN).toMatchObject({

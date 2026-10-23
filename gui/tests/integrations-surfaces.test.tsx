@@ -1629,7 +1629,7 @@ test("a loopback-only refusal is localized, not the server's English message", a
    */
   const { describeRefusal } = await import("../src/pages/integrations/refusal-copy");
   const { IntegrationApiError } = await import("../src/pages/integrations/integration-api");
-  const { DICTS } = await import("../src/i18n/shared");
+  const { DICTS } = await import("./helpers/i18n-catalogs");
 
   const serverEnglish = "kimi has nowhere to put the admission header a non-loopback bind requires";
   const refusal = new IntegrationApiError(500, {

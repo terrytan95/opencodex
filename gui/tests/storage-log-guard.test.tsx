@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import StorageWorkspace, { type StorageReport } from "../src/components/storage-workspace/StorageWorkspace";
 import { LanguageProvider } from "../src/i18n/provider";
-import { DICTS, I18nContext, interpolate, type TFn } from "../src/i18n/shared";
+import { DICTS } from "./helpers/i18n-catalogs";
+import { I18nContext, interpolate, type TFn } from "../src/i18n/shared";
 
 function report(): StorageReport {
   return {

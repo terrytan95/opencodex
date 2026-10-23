@@ -1,18 +1,18 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { useKeyedClientResource } from "./client-resource";
-import Dashboard from "./pages/Dashboard";
-import Providers from "./pages/Providers";
-import Models from "./pages/Models";
-import Advisor from "./pages/Advisor";
-import Subagents from "./pages/Subagents";
-import Logs from "./pages/Logs";
-import Usage from "./pages/Usage";
-import Storage from "./pages/Storage";
-import CodexSet from "./pages/CodexSet";
-import Integrations from "./pages/Integrations";
-import Startup from "./pages/Startup";
-import RemoteWorkspace from "./pages/RemoteWorkspace";
-import RemoteLink from "./pages/RemoteLink";
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Providers = lazy(() => import("./pages/Providers"));
+const Models = lazy(() => import("./pages/Models"));
+const Advisor = lazy(() => import("./pages/Advisor"));
+const Subagents = lazy(() => import("./pages/Subagents"));
+const Logs = lazy(() => import("./pages/Logs"));
+const Usage = lazy(() => import("./pages/Usage"));
+const Storage = lazy(() => import("./pages/Storage"));
+const CodexSet = lazy(() => import("./pages/CodexSet"));
+const Integrations = lazy(() => import("./pages/Integrations"));
+const Startup = lazy(() => import("./pages/Startup"));
+const RemoteWorkspace = lazy(() => import("./pages/RemoteWorkspace"));
+const RemoteLink = lazy(() => import("./pages/RemoteLink"));
 import ErrorBoundary from "./components/ErrorBoundary";
 import QuotaSummaryBar from "./components/quota-summary-bar/QuotaSummaryBar";
 import { SidebarGithubRow } from "./components/sidebar-github-row";
@@ -581,6 +581,7 @@ export default function App() {
           )}
           <ErrorBoundary
             key={shellPage}
+            onReload={() => window.location.reload()}
             pageName={t(PAGE_TKEY[shellPage])}
             title={t("errorBoundary.title")}
             message={t("errorBoundary.message")}
@@ -609,6 +610,7 @@ export default function App() {
                     setSharedSessionEpoch(epoch => epoch + 1);
                   }} />
                 )}
+                <Suspense fallback={<div role="status">{t("common.loading")}</div>}>
                 {page === "dashboard" && <Dashboard apiBase={sharedBase} readOnly={targets.link !== undefined} connected={targets.connected}
                   authenticationPending={targets.connected && !sharedSessionReady} refreshEpoch={sharedSessionEpoch} />}
                 {page === "startup" && <Startup apiBase={sharedBase} machineApiBase={machineBase} connected={targets.connected} />}
@@ -623,6 +625,7 @@ export default function App() {
                 {page === "remote-workspace" && <RemoteWorkspaceRoute available={remoteWorkspaceAvailable} apiBase={sharedBase} hubOrigin={targets.shared.serverOrigin} onOpenRemoteLink={() => navigateToPage("remote")} />}
                 {page === "codex-set" && <CodexSet apiBase={sharedBase} machineApiBase={machineBase} connected={targets.connected} />}
                 {shellPage === "integrations" && <Integrations apiBase={sharedBase} machineApiBase={machineBase} connected={targets.connected} />}
+                </Suspense>
               </>
             )}
           </ErrorBoundary>

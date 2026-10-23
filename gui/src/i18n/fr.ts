@@ -1,3 +1,4 @@
+import { uptimeCopy } from "./uptime-copy";
 import { desktopCompatibilityCopy } from "./desktop-compatibility-copy";
 import type { TKey } from "./en";
 
@@ -165,10 +166,7 @@ export const fr: Record<TKey, string> = {
   "codexAuth.quotaAutoRefreshLoadFailed": "Impossible de charger les paramètres d’activation. Réessayez.",
   "codexAuth.quotaAutoRefreshPartial": "Certains paramètres n’ont pas pu être enregistrés. Réessayez pour terminer la même modification.",
   "nav.dashboard": "Tableau de bord",
-  "uptime.day": "j",
-  "uptime.hour": "h",
-  "uptime.minute": "min",
-  "uptime.second": "s",
+  ...uptimeCopy("fr"),
   "nav.startup": "Démarrage",
   "nav.providers": "Fournisseurs",
   "nav.models": "Modèles",

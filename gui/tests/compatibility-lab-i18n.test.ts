@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { DICTS, type Locale } from "../src/i18n/catalogs";
+import { DICTS } from "./helpers/i18n-catalogs";
+import { type Locale } from "../src/i18n/catalogs";
 import { LAB_CATALOG_OVERRIDES, labSupplement } from "../src/i18n/lab-translations";
 
 const NON_ENGLISH: Locale[] = ["de", "fr", "ja", "ko", "ru", "tr", "zh"];

@@ -6,7 +6,8 @@ import ProviderAuthPanel from "../src/components/provider-workspace/ProviderAuth
 import { CodexAccountPoolCards } from "../src/components/codex-account-pool-cards";
 import type { ProviderAuthHandlers } from "../src/components/provider-workspace/types";
 import type { WorkspaceItem } from "../src/provider-workspace/catalog";
-import { I18nContext, DICTS, interpolate, LOCALES, type Locale, type TFn } from "../src/i18n/shared";
+import { DICTS } from "./helpers/i18n-catalogs";
+import { I18nContext, interpolate, LOCALES, type Locale, type TFn } from "../src/i18n/shared";
 import { formatAccountPauseTooltip } from "../src/account-pause-display";
 import { ACCOUNT_PAUSE_REASONS } from "../../src/types/account-auto-pause";
 

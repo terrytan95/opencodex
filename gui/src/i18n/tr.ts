@@ -1,3 +1,4 @@
+import { uptimeCopy } from "./uptime-copy";
 import { desktopCompatibilityCopy } from "./desktop-compatibility-copy";
 // Turkish — generated from en.ts. Must match TKey set (compile-checked).
 import type { TKey } from "./en";
@@ -167,10 +168,7 @@ export const tr: Record<TKey, string> = {
   "codexAuth.quotaAutoRefreshPartial": "Bazı ayarlar kaydedilemedi. Aynı değişikliği tamamlamak için yeniden deneyin.",
   // sidebar / nav / common
   "nav.dashboard": "Gösterge Paneli",
-  "uptime.day": " gün",
-  "uptime.hour": " saat",
-  "uptime.minute": " dk",
-  "uptime.second": " sn",
+  ...uptimeCopy("tr"),
   "nav.startup": "Başlatma Güvenliği",
   "nav.providers": "Sağlayıcılar",
   "nav.models": "Modeller",

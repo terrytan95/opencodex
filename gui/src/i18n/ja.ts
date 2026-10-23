@@ -1,3 +1,4 @@
+import { uptimeCopy } from "./uptime-copy";
 import { desktopCompatibilityCopy } from "./desktop-compatibility-copy";
 import type { TKey } from "./en";
 
@@ -166,10 +167,7 @@ export const ja: Record<TKey, string> = {
   "codexAuth.quotaAutoRefreshPartial": "一部の設定を保存できませんでした。再試行で同じ変更を完了します。",
   // sidebar / nav / common
   "nav.dashboard": "ダッシュボード",
-  "uptime.day": "日",
-  "uptime.hour": "時間",
-  "uptime.minute": "分",
-  "uptime.second": "秒",
+  ...uptimeCopy("ja"),
   "nav.startup": "起動安全性",
   "nav.providers": "プロバイダー",
   "nav.models": "モデル",

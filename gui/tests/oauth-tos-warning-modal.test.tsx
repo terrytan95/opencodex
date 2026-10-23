@@ -12,7 +12,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import OAuthTosWarningModal from "../src/components/OAuthTosWarningModal";
 import { LanguageProvider } from "../src/i18n/provider";
-import { DICTS, LOCALES } from "../src/i18n/shared";
+import { DICTS } from "./helpers/i18n-catalogs";
+import { LOCALES } from "../src/i18n/shared";
 
 const globals = ["document", "window", "navigator", "IS_REACT_ACT_ENVIRONMENT"] as const;
 let previousGlobals: Record<(typeof globals)[number], PropertyDescriptor | undefined>;

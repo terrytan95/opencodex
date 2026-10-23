@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { parseCompatibilityCertificate, parseCompatibilityRuntime, runCompatibilityAction } from "../src/desktop-compatibility-api";
-import { DICTS } from "../src/i18n/catalogs";
+import { DICTS } from "./helpers/i18n-catalogs";
 const originalFetch = globalThis.fetch;
 test("observation counters never upgrade response observations into native recovery proof", () => {
   const observation = { jsonSnapshots: 1, streamSnapshots: 3, validatedActiveStreams: 1, lastSnapshotAt: 1000,

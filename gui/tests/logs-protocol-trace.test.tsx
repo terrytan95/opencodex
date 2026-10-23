@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ProtocolTraceV1 } from "../../src/protocols/dto";
 import { ProtocolBadge } from "../src/components/protocols/ProtocolBadge";
 import { ProtocolTracePanel } from "../src/components/protocols/ProtocolTracePanel";
-import { DICTS, interpolate, type TFn } from "../src/i18n/shared";
+import { DICTS } from "./helpers/i18n-catalogs";
+import { interpolate, type TFn } from "../src/i18n/shared";
 import { DEFAULT_LOG_FILTER_STATE, filterLogs, hasActiveLogFilters } from "../src/pages/logs-filter";
 
 const t: TFn = (key, vars) => interpolate(DICTS.en[key], vars);

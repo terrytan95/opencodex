@@ -3,7 +3,8 @@ import { Window } from "happy-dom";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { LanguageProvider } from "../src/i18n/provider";
-import { DICTS, LOCALES } from "../src/i18n/shared";
+import { DICTS } from "./helpers/i18n-catalogs";
+import { LOCALES } from "../src/i18n/shared";
 import SubagentSurfaceWarningModal from "../src/components/SubagentSurfaceWarningModal";
 import { SUBAGENT_SURFACE_GUIDE_URL, readSubagentSurfaceAdvisory, subagentSurfaceLabel } from "../src/subagent-surface";
 

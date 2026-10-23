@@ -13,7 +13,8 @@ import { act } from "react";
 import type { Root } from "react-dom/client";
 import AnthropicAccountPoolSettings from "../src/components/provider-workspace/AnthropicAccountPoolSettings";
 import { LanguageProvider } from "../src/i18n/provider";
-import { DICTS, LOCALES } from "../src/i18n/shared";
+import { DICTS } from "./helpers/i18n-catalogs";
+import { LOCALES } from "../src/i18n/shared";
 
 const domGlobals = ["document", "window", "navigator", "fetch", "IS_REACT_ACT_ENVIRONMENT"] as const;
 let previousDomGlobals: Record<(typeof domGlobals)[number], PropertyDescriptor | undefined>;

@@ -211,7 +211,7 @@ test("older and unknown DTOs never invent a timing basis; absent and unavailable
 });
 
 test("all locales translate both explicit bases and the unknown fallback", async () => {
-  const { DICTS } = await import("../src/i18n/shared");
+  const { DICTS } = await import("./helpers/i18n-catalogs");
   for (const dict of Object.values(DICTS)) {
     for (const timingBasis of ["generation-window", "legacy-post-visible-output", undefined, "unknown-new-value"]) {
       const keys = decodeRateLabelKeys({ timingBasis });

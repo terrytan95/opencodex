@@ -1,3 +1,4 @@
+import { uptimeCopy } from "./uptime-copy";
 import { desktopCompatibilityCopy } from "./desktop-compatibility-copy";
 // Brazilian Portuguese — generated from en.ts. Must match TKey set (compile-checked).
 import type { TKey } from "./en";
@@ -233,10 +234,7 @@ export const pt: Record<TKey, string> = {
   "codexAuth.quotaAutoRefreshLoadFailed": "Não foi possível carregar as configurações de ativação. Tente novamente para verificar o estado delas.",
   "codexAuth.quotaAutoRefreshPartial": "Algumas configurações não puderam ser salvas. Tente novamente para concluir a mesma alteração.",
   "nav.dashboard": "Painel",
-  "uptime.day": "d",
-  "uptime.hour": "h",
-  "uptime.minute": "m",
-  "uptime.second": "s",
+  ...uptimeCopy("pt"),
   "nav.startup": "Inicialização",
   "nav.providers": "Provedores",
   "nav.models": "Modelos",

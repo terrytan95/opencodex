@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { DICTS, type Locale } from "../src/i18n/shared";
+import { DICTS } from "./helpers/i18n-catalogs";
+import { type Locale } from "../src/i18n/shared";
 
 async function apiKeysSources(): Promise<string> {
   const page = await Bun.file(new URL("../src/pages/ApiKeys.tsx", import.meta.url)).text();

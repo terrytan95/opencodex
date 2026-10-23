@@ -19,7 +19,7 @@
  * already answers the same problem the same way, and this reuses its dismissal, focus and
  * validation behaviour along with the modal classes in `styles.css`.
  */
-import { DICTS, getActiveLocale, type Locale } from "./i18n/shared";
+import { catalogFor, getActiveLocale, type Locale } from "./i18n/shared";
 
 /** Keeps element ids unique when two dialogs are opened in one document. */
 let dialogSequence = 0;
@@ -86,7 +86,7 @@ function openModal<T>(
   resolve: (value: T) => void,
   signal?: AbortSignal,
 ): ModalShell<T> {
-  const messages = DICTS[locale];
+  const messages = catalogFor(locale);
   const id = `opencodex-action-dialog-${++dialogSequence}`;
   /*
    * Duck-typed rather than `instanceof HTMLElement`. These helpers are reached from a dozen
@@ -203,7 +203,7 @@ function appendMessage(form: HTMLFormElement, bodyId: string, message: string, t
  */
 export function confirmAction(options: ConfirmActionOptions): Promise<boolean> {
   const locale = options.locale ?? getActiveLocale();
-  const messages = DICTS[locale];
+  const messages = catalogFor(locale);
   const danger = options.tone === "danger";
 
   return new Promise<boolean>((resolve) => {
@@ -246,7 +246,7 @@ export function confirmAction(options: ConfirmActionOptions): Promise<boolean> {
  */
 export function requestTextValue(options: RequestTextValueOptions): Promise<string | null> {
   const locale = options.locale ?? getActiveLocale();
-  const messages = DICTS[locale];
+  const messages = catalogFor(locale);
 
   return new Promise<string | null>((resolve) => {
     if (options.signal?.aborted) { resolve(null); return; }

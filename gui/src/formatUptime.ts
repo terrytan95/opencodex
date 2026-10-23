@@ -1,11 +1,9 @@
-import { catalogValue, type Locale } from "./i18n/catalogs";
+import type { Locale } from "./i18n/catalogs";
+import { uptimeCopy } from "./i18n/uptime-copy";
 
 export function formatUptime(seconds: number, locale: Locale): string {
   const totalSeconds = Math.max(0, Math.floor(seconds));
-  const day = catalogValue(locale, "uptime.day");
-  const hour = catalogValue(locale, "uptime.hour");
-  const minute = catalogValue(locale, "uptime.minute");
-  const second = catalogValue(locale, "uptime.second");
+  const { "uptime.day": day, "uptime.hour": hour, "uptime.minute": minute, "uptime.second": second } = uptimeCopy(locale);
 
   if (totalSeconds < 5 * 60) return `${totalSeconds}${second}`;
 

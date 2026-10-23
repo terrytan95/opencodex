@@ -3,7 +3,7 @@ import { Window } from "happy-dom";
 import { act } from "react";
 import type { Root } from "react-dom/client";
 import { LanguageProvider } from "../src/i18n/provider";
-import { DICTS } from "../src/i18n/shared";
+import { DICTS } from "./helpers/i18n-catalogs";
 import { ApiKeysEndpointsPanel } from "../src/pages/api-keys-endpoints-panel";
 import { parseApiSurfaces, type ApiSurfacesInfo } from "../src/pages/api-keys-utils";
 import { patchProtocolSettings } from "../src/protocol-api";

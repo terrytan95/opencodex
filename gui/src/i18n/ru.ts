@@ -1,3 +1,4 @@
+import { uptimeCopy } from "./uptime-copy";
 import { desktopCompatibilityCopy } from "./desktop-compatibility-copy";
 import type { TKey } from "./en";
 
@@ -166,10 +167,7 @@ export const ru: Record<TKey, string> = {
   "codexAuth.quotaAutoRefreshPartial": "Не удалось сохранить часть настроек. Повторите попытку для завершения того же изменения.",
   // sidebar / nav / common
   "nav.dashboard": "Дашборд",
-  "uptime.day": "д",
-  "uptime.hour": "ч",
-  "uptime.minute": "мин",
-  "uptime.second": "с",
+  ...uptimeCopy("ru"),
   "nav.startup": "Безопасность запуска",
   "nav.providers": "Провайдеры",
   "nav.models": "Модели",

@@ -1,7 +1,8 @@
+import { DICTS } from "../../gui/tests/helpers/i18n-catalogs";
 import { describe, expect, test } from "bun:test";
 import { createElement } from "../../gui/node_modules/react";
 import { renderToStaticMarkup } from "../../gui/node_modules/react-dom/server";
-import { DICTS, I18nContext, type TFn } from "../../gui/src/i18n/shared";
+import { I18nContext, type TFn } from "../../gui/src/i18n/shared";
 import { StartupHeroSection } from "../../gui/src/pages/startup-sections";
 import type { StartupHealthData } from "../../gui/src/pages/startup-shared";
 import {

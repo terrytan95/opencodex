@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Window } from "happy-dom";
 import { act } from "react";
 import type { Root } from "react-dom/client";
 import { LanguageProvider, useI18n } from "../src/i18n";
 import { LOCALES, localeDisplayName } from "../src/i18n/shared";
 import { Select } from "../src/ui";
+import * as catalogs from "../src/i18n/catalogs";
 
 // lidge-jun's review asked for a rendered language-switch smoke test demonstrating the
 // Traditional Chinese UI in the actual application surface. Two independent SSR renders (en,
@@ -24,6 +25,7 @@ const NAV_TKEYS = [
   "nav.usageLogs",
   "nav.remote",
 ] as const;
+let languageApi: ReturnType<typeof useI18n>;
 
 function NavRows() {
   const t = useI18n().t;
@@ -40,7 +42,8 @@ function NavRows() {
 
 /** Mirror App.tsx's sidebar footer: nav rows + language <Select> wiring to setLocale. */
 function LanguageSurface() {
-  const { locale, setLocale, t } = useI18n();
+  languageApi = useI18n();
+  const { locale, setLocale, t } = languageApi;
   return (
     <div className="sidebar-foot">
       <NavRows />
@@ -153,7 +156,11 @@ async function choose(labels: string[]): Promise<void> {
   const option = [...testWindow.document.querySelectorAll<HTMLElement>('[role="option"]')]
     .find((o) => labels.includes(o.textContent ?? ""));
   if (!option) throw new Error(`option ${labels.join("/")} missing; got ${optionLabels().join(",")}`);
-  await act(async () => option.click());
+  await act(async () => {
+    option.click();
+    const target = LOCALES.find(l => labels.includes(localeDisplayName(l.code)))!;
+    await catalogs.loadCatalog(target.code);
+  });
 }
 
 describe("zh-TW language switch on the real GUI surface", () => {
@@ -252,4 +259,45 @@ describe("French language switch on the real GUI surface", () => {
     }
     expect(Object.getOwnPropertyDescriptor(smokeNavigator, "language")).toEqual(expectedSmokeLanguageDescriptor);
   });
+});
+
+test("late catalog downloads cannot replace a newer language choice", async () => {
+  const french = await catalogs.loadCatalog("fr");
+  const korean = await catalogs.loadCatalog("ko");
+  await mountSurface();
+  let finishFrench!: (value: catalogs.Catalog) => void;
+  let finishKorean!: (value: catalogs.Catalog) => void;
+  const loaded = catalogs.loadedCatalog;
+  const cached = spyOn(catalogs, "loadedCatalog").mockImplementation(locale =>
+    locale === "fr" || locale === "ko" ? undefined : loaded(locale));
+  const loader = spyOn(catalogs, "loadCatalog").mockImplementation(locale => new Promise(resolve => {
+    if (locale === "fr") finishFrench = resolve;
+    else finishKorean = resolve;
+  }));
+  try {
+    await act(async () => { languageApi.setLocale("fr"); languageApi.setLocale("ko"); });
+    expect(navLabels()).toContain("Dashboard");
+    await act(async () => finishKorean(korean));
+    expect(languageApi.locale).toBe("ko");
+    await act(async () => finishFrench(french));
+    expect(languageApi.locale).toBe("ko");
+    expect(localStorage.getItem("ocx-lang")).toBe("ko");
+  } finally { loader.mockRestore(); cached.mockRestore(); }
+});
+
+test("a failed language download keeps the current language and can be retried", async () => {
+  const french = await catalogs.loadCatalog("fr");
+  await mountSurface();
+  const loaded = catalogs.loadedCatalog;
+  const cached = spyOn(catalogs, "loadedCatalog").mockImplementation(locale =>
+    locale === "fr" ? undefined : loaded(locale));
+  const loader = spyOn(catalogs, "loadCatalog").mockRejectedValueOnce(new Error("offline")).mockResolvedValue(french);
+  try {
+    await act(async () => languageApi.setLocale("fr"));
+    expect(languageApi.locale).toBe("en");
+    expect(localStorage.getItem("ocx-lang")).toBe("en");
+    await act(async () => languageApi.setLocale("fr"));
+    expect(languageApi.locale).toBe("fr");
+    expect(localStorage.getItem("ocx-lang")).toBe("fr");
+  } finally { loader.mockRestore(); cached.mockRestore(); }
 });

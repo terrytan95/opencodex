@@ -1,3 +1,4 @@
+import { uptimeCopy } from "./uptime-copy";
 import { desktopCompatibilityCopy } from "./desktop-compatibility-copy";
 // Vietnamese — generated from en.ts. Must match TKey set (compile-checked).
 import type { TKey } from "./en";
@@ -166,10 +167,7 @@ export const vi: Record<TKey, string> = {
   "codexAuth.quotaAutoRefreshLoadFailed": "Không thể tải các cài đặt kích hoạt. Hãy thử lại để kiểm tra trạng thái của chúng.",
   "codexAuth.quotaAutoRefreshPartial": "Không thể lưu một số cài đặt. Hãy thử lại để hoàn tất cùng một thay đổi.",
   "nav.dashboard": "Bảng điều khiển",
-  "uptime.day": "ng",
-  "uptime.hour": "g",
-  "uptime.minute": "p",
-  "uptime.second": "g",
+  ...uptimeCopy("vi"),
   "nav.startup": "Khởi động",
   "nav.providers": "Nhà cung cấp",
   "nav.models": "Models",

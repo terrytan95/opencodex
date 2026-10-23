@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DICTS } from "../src/i18n/catalogs";
+import { DICTS } from "./helpers/i18n-catalogs";
 import { interpolate, type TFn } from "../src/i18n/shared";
 import {
   formatEstimatedUsd,

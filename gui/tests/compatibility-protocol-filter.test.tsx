@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
-import { DICTS, I18nContext, interpolate, type TFn } from "../src/i18n/shared";
+import { DICTS } from "./helpers/i18n-catalogs";
+import { I18nContext, interpolate, type TFn } from "../src/i18n/shared";
 import {
   buildMatrixRows,
   filterMatrixRowsByProtocol,

@@ -1,3 +1,4 @@
+import { uptimeCopy } from "./uptime-copy";
 import { desktopCompatibilityCopy } from "./desktop-compatibility-copy";
 import type { TKey } from "./en";
 
@@ -2894,10 +2895,7 @@ export const zhTW: Record<TKey, string> = {
   "api.clientConfig.whereBody": "上述目標是全域路徑。工作目錄中的專案本地設定檔優先於它，且用戶端從設定中指定的環境變數讀取金鑰 — 絕不從此檔案讀取。",
   "api.attribution.totalRequestsAvailable": "可用歷史紀錄中的請求",
   "api.attribution.sinceAvailable": "可用歸因起始自",
-  "uptime.day": "天",
-  "uptime.hour": "小時",
-  "uptime.minute": "分鐘",
-  "uptime.second": "秒",
+  ...uptimeCopy("zh-TW"),
   "auth.adminTokenTitle": "OpenCodex 管理員金鑰 (OPENCODEX_ADMIN_AUTH_TOKEN)",
   "auth.adminAccountLabel": "帳號",
   "auth.adminTokenFieldLabel": "管理員金鑰",

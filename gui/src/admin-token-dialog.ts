@@ -1,4 +1,4 @@
-import { DICTS, getActiveLocale, type Locale } from "./i18n/shared";
+import { catalogFor, getActiveLocale, type Locale } from "./i18n/shared";
 
 const ADMIN_TOKEN_DIALOG_ID = "opencodex-admin-token-dialog";
 const ADMIN_TOKEN_USERNAME = "OpenCodex";
@@ -16,7 +16,7 @@ export function promptForAdminToken(
   verifyToken: AdminTokenVerifier,
   locale: Locale = getActiveLocale(),
 ): Promise<string | null> {
-  const messages = DICTS[locale];
+  const messages = catalogFor(locale);
   const titleText = messages["auth.adminTokenTitle"];
 
   return new Promise((resolve) => {
