@@ -13,8 +13,6 @@ import type { TKey } from "../../i18n/shared";
 import type { FileIntegrationClientId } from "./FileIntegrationPage";
 
 export type IntegrationTab =
-  | "inventory"
-  | "scenarios"
   | "overview"
   | "keys"
   | "codex"
@@ -32,8 +30,6 @@ export interface TabDefinition {
 
 export const TABS: readonly TabDefinition[] = [
   { id: "overview", hash: "integrations", labelKey: "integrations.tab.overview" },
-  { id: "inventory", hash: "integrations/inventory", labelKey: "inventory.title" },
-  { id: "scenarios", hash: "integrations/scenarios", labelKey: "scenarios.title" },
   { id: "keys", hash: "integrations/keys", labelKey: "integrations.tab.keys" },
   { id: "codex", hash: "integrations/codex", labelKey: "integrations.tab.codex" },
   // Claude keeps its own #claude/* hashes; Integrations maps that family onto this tab.

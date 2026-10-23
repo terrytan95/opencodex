@@ -99,8 +99,8 @@ describe("registered nested hashes", () => {
     expect(INTEGRATION_TAB_HASHES).not.toContain("integrations/overview");
   });
 
-  test("an unregistered suffix is normalized back to the bare page", () => {
-    const action = resolveAppHashChange("integrations/nonsense");
+  test.each(["nonsense", "inventory", "scenarios"])("unregistered suffix %s returns to the bare page", (suffix) => {
+    const action = resolveAppHashChange(`integrations/${suffix}`);
     expect(action.page).toBe("integrations");
     expect(action.replaceTo).toBe("integrations");
   });

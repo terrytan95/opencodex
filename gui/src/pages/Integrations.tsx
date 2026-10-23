@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { navigateHash } from "../hash-routing";
 import { canonicalHashPath } from "../app-routing";
 import { useT } from "../i18n/shared";
@@ -16,9 +16,6 @@ import FileIntegrationPage, {
   type FileIntegrationClientId,
 } from "./integrations/FileIntegrationPage";
 import { FILE_CLIENTS, TABS, type IntegrationTab } from "./integrations/integration-tabs";
-
-const AssetInventoryPage = lazy(() => import("./integrations/AssetInventoryPage"));
-const ScenariosPage = lazy(() => import("./integrations/ScenariosPage"));
 
 function readIntegrationTab(hash = window.location.hash): IntegrationTab {
   // Read the destination, not a legacy spelling the route hook is about to replace.
@@ -47,7 +44,7 @@ function panelDomId(tab: IntegrationTab): string {
  * than borrowing a mark that would imply a client.
  */
 function tabMark(tab: IntegrationTab): string | null {
-  if (tab === "overview" || tab === "keys" || tab === "scenarios" || tab === "inventory") return null;
+  if (tab === "overview" || tab === "keys") return null;
   return INTEGRATION_MARKS[tab] ?? null;
 }
 
@@ -187,8 +184,6 @@ export default function Integrations({ apiBase, machineApiBase = apiBase, connec
             aria-labelledby={tabDomId(definition.id)}
             hidden={!active}
           >
-            {definition.id === "inventory" && <Suspense fallback={null}><AssetInventoryPage key={machineApiBase} apiBase={machineApiBase} active={active} /></Suspense>}
-            {definition.id === "scenarios" && <Suspense fallback={null}><ScenariosPage key={machineApiBase} apiBase={machineApiBase} active={active} /></Suspense>}
             {definition.id === "overview" && (
               <IntegrationsOverview apiBase={apiBase} active={active} />
             )}

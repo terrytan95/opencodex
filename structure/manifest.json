@@ -1082,30 +1082,6 @@
         "src/server/management/routing-profile-routes.ts",
         "gui/src/components/RoutingRulesEditor.tsx"
       ]
-    },
-    {
-      "path": "workspace-scenarios.md",
-      "tier": 5,
-      "title": "Workspace Scenarios",
-      "scope": "Credential-free model-default snapshots and preview-bound client configuration changes.",
-      "documents": [
-        "src/integrations/scenario-clients.ts",
-        "src/integrations/scenarios.ts",
-        "src/server/management/scenario-routes.ts",
-        "src/config/atomic-write.ts"
-      ]
-    },
-    {
-      "path": "asset-inventory.md",
-      "tier": 5,
-      "title": "MCP And Skills Inventory",
-      "scope": "Bounded read-only local discovery, source coverage and metadata-only presentation.",
-      "documents": [
-        "src/integrations/asset-inventory.ts",
-        "src/integrations/asset-inventory-types.ts",
-        "src/server/management/asset-inventory-routes.ts",
-        "gui/src/pages/integrations/AssetInventoryPage.tsx"
-      ]
     }
   ],
   "contracts": {
