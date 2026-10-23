@@ -65,7 +65,7 @@ roster 为空时，opencodex 不固定任何行，前五个按目录原有的 pr
 
 - 设置五个模型。roster 满了就没有可填补的位置。
 - 对于永远不想被提供的模型，将其禁用，或不放进其 provider 的 `selectedModels`。被禁用或未选中的模型会离开选择器，不会填补位置。
-- `modelPickerOrder` 会改变 Codex 排序所用的 priority。只含路由行的列表会把列出的未设置行移到 `1000` 及以上，因此未列出的路由行会先填补位置。包含裸原生 id 的列表会对整个选择器排序（包括已设置的行）：列出的行排在前面，先于任何未列出的行占据列出位置。参见 [Model ordering](/guides/model-ordering/)。
+- `modelPickerOrder` 可以统一排列所有可用模型，包括精选和原生模型。任何非空列表都按数组顺序将列出的模型置于最前，其余模型按自然优先级随后排列；无需加入原生 ID 才能启用。精确目录 ID 优先于等价的原始/编码路由 ID，账户限定行须使用完整 selector ID。排序不会显示已隐藏的模型。
 
 在 v2 上，Codex 会在取前五个之前跳过固定为 `"disabled"` 的行；其余机制相同。opencodex 的 v2 指引 roster（`{{roster}}`）只列出位于前五之内的已配置 roster 模型，因此填补的模型只出现在 Codex 的工具描述中，不会出现在 opencodex 指引里。Codex 在会话开始时读取目录，因此 roster 的更改从新会话开始生效。
 

@@ -214,7 +214,7 @@ describe("anthropic-flavor ModelInfo discovery entries (devlog 130 B4b)", () => 
 
 
 describe("saved picker order changes groups after identity selection", () => {
-  test.each(["readable", "desktop3p"] as const)("%s keeps native and featured groups, metadata and siblings", idStyle => {
+  test.each(["readable", "desktop3p"] as const)("%s reorders featured groups while preserving native prefix, metadata and siblings", idStyle => {
     const models = [
       { provider: "p", id: "featured", contextWindow: 1_000_000, reasoningEfforts: ["high"] },
       { provider: "p", id: "a", contextWindow: 1_000_000, reasoningEfforts: ["high"] },
@@ -225,7 +225,7 @@ describe("saved picker order changes groups after identity selection", () => {
     const after = buildAnthropicModelInfos(["gpt-5.5"], models, undefined, idStyle, alias, undefined, false, () => true,
       { modelPickerOrder: ["p/b", "p/a", "p/featured"], featured: ["p/featured"] });
     expect(after.filter(row => !row.id.includes("[1m]") && !row.id.endsWith("--fast")).map(row => row.display_name))
-      .toEqual(["gpt-5.5 (native)", "featured (p)", "b (p)", "a (p)"]);
+      .toEqual(["gpt-5.5 (native)", "b (p)", "a (p)", "featured (p)"]);
     expect(after.toSorted((a, b) => a.id.localeCompare(b.id))).toEqual(before.toSorted((a, b) => a.id.localeCompare(b.id)));
     const b = after.findIndex(row => row.display_name === "b (p)");
     expect(after.slice(b, b + 3).map(row => row.display_name)).toEqual(["b (p)", "b (p) · 1M", "b (p) · Fast"]);

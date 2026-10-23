@@ -121,11 +121,7 @@ agent names it exactly. To control what Codex advertises:
 - Feature five models. With a full roster, no slot is left to fill.
 - Disable a model you never want offered, or leave it out of its provider's `selectedModels`.
   A disabled or unselected model leaves the picker and cannot fill a slot.
-- `modelPickerOrder` changes the priorities Codex sorts by. A routed-only list moves the listed
-  unfeatured rows to `1000` and up, so the unlisted routed rows fill the slots first. A list that
-  contains a bare native id orders the complete picker, featured rows included: listed rows come
-  first and take the advertised slots before any unlisted row. See
-  [Model ordering](/guides/model-ordering/).
+- Use `modelPickerOrder` to order **all available models**, including featured and native models. Every nonempty list applies the same rule: listed ids come first in array order; unlisted rows follow in their natural priority order. No native id is required to activate this behavior.
 
 On v2, Codex skips rows pinned `"disabled"` before it takes the five; otherwise the window works
 the same way. The opencodex v2 guidance roster (`{{roster}}`) names only configured roster models

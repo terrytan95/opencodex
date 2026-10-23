@@ -95,8 +95,6 @@ export function modelPickerOrderMode(
   models: readonly string[], saved: readonly string[], mode?: SavedModelPickerOrderMode | null,
 ): ModelPickerOrderMode {
   if (saved.length === 0) return "default";
-  // Existing complete/native orders are never silently replaced by a routed preset.
-  if (saved.some(id => !id.includes("/"))) return "custom";
   if (mode === "alphabetical" || mode === "provider" || mode === "most-used") return mode;
   const candidates = new Set(models);
   if (new Set(saved).size !== saved.length || saved.length !== candidates.size
@@ -112,7 +110,7 @@ export function modelPickerOrderMode(
 
 /** Resolve exact canonical ids before legacy provider/raw spellings; never guess a bare native id. */
 export function normalizePickerIds(ids: readonly string[], available: readonly string[], identities: readonly PickerModelIdentity[]): string[] {
-  const candidates = new Set(available.filter(id => id.includes("/")));
+  const candidates = new Set(available);
   const resolve = (id: string): string | undefined => {
     if (candidates.has(id)) return id;
     const matches = new Set(identities.filter(row => candidates.has(row.namespaced)
@@ -145,24 +143,23 @@ export function pickerIdentityCoverage(available: readonly string[], identities:
   });
 }
 
-export function customPickerRows(settings: PickerOrderSettings, identities: readonly PickerModelIdentity[]): { order: string[]; fixed: string[] } | null {
-  // Unknown featured state and complete/native orders cannot safely become routed-only drafts.
-  if (settings.chosen === undefined || settings.pickerOrder.some(id => !id.includes("/"))) return null;
-  const available = [...new Set(settings.pickerAvailable.filter(id => id.includes("/")))];
+export function customPickerRows(settings: PickerOrderSettings, identities: readonly PickerModelIdentity[]): { order: string[]; featured: string[] } | null {
+  if (settings.chosen === undefined) return null;
+  const available = [...new Set(settings.pickerAvailable)];
   if (!pickerIdentityCoverage(available, identities)) return null;
   // Roster strings stay verbatim. Map uses the LAST occurrence; each row prefers its exact canonical rank.
   const chosenRank = new Map(settings.chosen.map((id, index) => [id, index]));
   const rawBySlug = new Map(identities.map(row => [row.namespaced, `${row.provider}/${row.id}`]));
   const rankOf = (slug: string) => chosenRank.get(slug) ?? chosenRank.get(rawBySlug.get(slug)!);
-  const fixed = available.filter(slug => rankOf(slug) !== undefined).sort((a, b) => rankOf(a)! - rankOf(b)!);
+  const featured = available.filter(slug => rankOf(slug) !== undefined).sort((a, b) => rankOf(a)! - rankOf(b)!);
   const saved = normalizePickerIds(settings.pickerOrder, available, identities);
-  return { fixed, order: [...new Set([...fixed, ...saved, ...available])] };
+  return { featured, order: [...new Set([...saved, ...featured, ...available])] };
 }
 
 /** Drop semantics: remove first, re-find the target, then insert before it. */
-export function movePickerBefore(order: readonly string[], source: string, target: string, fixed: readonly string[]): string[] {
+export function movePickerBefore(order: readonly string[], source: string, target: string): string[] {
   const next = [...order];
-  if (source === target || fixed.includes(source) || fixed.includes(target)
+  if (source === target
     || !next.includes(source) || !next.includes(target)) return next;
   next.splice(next.indexOf(source), 1);
   next.splice(next.indexOf(target), 0, source);
@@ -170,9 +167,9 @@ export function movePickerBefore(order: readonly string[], source: string, targe
 }
 
 /** Keyboard semantics deliberately differ from dropping before the next row. */
-export function stepPickerOrder(order: readonly string[], source: string, direction: -1 | 1, fixed: readonly string[]): string[] {
+export function stepPickerOrder(order: readonly string[], source: string, direction: -1 | 1): string[] {
   const next = [...order], index = next.indexOf(source), target = index + direction;
-  if (index < 0 || target < 0 || target >= next.length || fixed.includes(source) || fixed.includes(next[target]!)) return next;
+  if (index < 0 || target < 0 || target >= next.length) return next;
   [next[index], next[target]] = [next[target]!, next[index]!];
   return next;
 }

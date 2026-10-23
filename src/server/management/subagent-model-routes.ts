@@ -1,5 +1,6 @@
 import type { ManagementContext } from "./context";
-import { catalogModelSlug, filterCatalogVisibleModels, nativeModelRows, listCatalogNativeSlugs } from "../../codex/catalog";
+import { filterCatalogVisibleModels, listCatalogNativeSlugs, type CatalogModel } from "../../codex/catalog";
+import { listManagementModelRows } from "./model-rows";
 import { subagentSelectableModels } from "../../codex/subagent-selectable-models";
 import { saveConfigPreservingClaudeCode, deleteConfigTopLevelKey, mutatePersistedConfig, adoptPersistedClaudeCode, initializePersistedConfigIfMissing, observeInitialConfigState } from "../../config";
 import { captureConfigTopLevelRollback, parsedConfigRebaseDeletionKeys, projectConfigRebaseProvenance, deleteConfigObjectChildKey } from "../../config/rebase-provenance";
@@ -11,6 +12,12 @@ import { inspectSubagentForceStatus } from "../../claude/subagent-force-status";
 import { jsonResponse } from "../auth-cors";
 import { isPlainRecord, fetchInitializedModels as fetchAllModels } from "./shared";
 import { readManagementJsonBody, rethrowManagementBodyTooLarge } from "./body";
+
+async function pickerAvailable(config: ManagementContext["config"], models: readonly CatalogModel[]): Promise<string[]> {
+  const rows = await listManagementModelRows(config, { models });
+  const visible = new Set(filterCatalogVisibleModels(rows.filter(row => !row.native), config));
+  return [...new Set(rows.filter(row => !row.disabled && (row.native || visible.has(row))).map(row => row.namespaced))];
+}
 
 export async function handleSubagentModelRoutes(ctx: ManagementContext, autoApplyDesktopBestEffort: () => Promise<void>): Promise<Response | null> {
   const { req, url, config, deps, convergeCodexCatalog, syncClaudeAgentDefsBestEffort } = ctx;
@@ -46,7 +53,7 @@ export async function handleSubagentModelRoutes(ctx: ManagementContext, autoAppl
       forceStatus: config.claudeCode?.subagentModelForce === undefined ? null : await inspectSubagentForceStatus(
         resolveSubagentForceModel(config, {}, { entries: forceAvailable }) !== null,
       ),
-      pickerAvailable: [...new Set(filterCatalogVisibleModels(models, config).map(catalogModelSlug).filter(slug => slug.includes("/")))],
+      pickerAvailable: await pickerAvailable(config, models),
       pickerOrder: config.modelPickerOrder ?? [],
       pickerOrderMode: config.modelPickerOrderMode ?? null,
     });
@@ -80,7 +87,7 @@ export async function handleSubagentModelRoutes(ctx: ManagementContext, autoAppl
     if (updatesPicker) {
       if (body.pickerOrder !== null && (!Array.isArray(body.pickerOrder)
         || body.pickerOrder.some(model => typeof model !== "string" || model.trim() === ""))) {
-        return jsonResponse({ error: "pickerOrder must be an array of non-empty routed model ids, or null" }, 400);
+        return jsonResponse({ error: "pickerOrder must be an array of non-empty model ids, or null" }, 400);
       }
       pickerOrder = body.pickerOrder === null ? [] : (body.pickerOrder as string[]).map(model => model.trim());
       if (new Set(pickerOrder).size !== pickerOrder.length) {
@@ -89,9 +96,7 @@ export async function handleSubagentModelRoutes(ctx: ManagementContext, autoAppl
       if (pickerOrder.length > 0) {
         const models = await (deps.fetchAllModels ?? fetchAllModels)(config);
         // Evaluate visibility AFTER discovery: a concurrent visibility write may have completed.
-        const visible = new Set(filterCatalogVisibleModels(models, config).map(catalogModelSlug).filter(slug => slug.includes("/")));
-        // A bare native id orders the complete picker (docs: guides/model-ordering.md).
-        for (const row of nativeModelRows(config)) if (!row.disabled) visible.add(row.slug);
+        const visible = new Set(await pickerAvailable(config, models));
         if (pickerOrder.some(model => !visible.has(model))) {
           return jsonResponse({ error: "pickerOrder must contain visible routed or native model ids, each at most once" }, 400);
         }

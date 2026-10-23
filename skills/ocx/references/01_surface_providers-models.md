@@ -933,7 +933,7 @@ State-changing: yes. JSON mode: `envelope`.
 
 Usage: `ocx models order status [--json]`
 
-Read saved picker order, routed candidates and featured state.
+Read saved picker order, all visible candidates and featured state.
 
 State-changing: no. JSON mode: `envelope`.
 
@@ -945,13 +945,13 @@ State-changing: no. JSON mode: `envelope`.
 |---|---|---|
 | `--json` | boolean | Emit the validated command result as JSON. |
 
-- Preserves native IDs in saved order. pickerAvailable is routed-only; unknown featured state is not an empty successful roster.
+- Preserves native IDs in saved order. pickerAvailable includes native and routed models; unknown featured state is not an empty successful roster.
 
 ### `ocx models order set`
 
 Usage: `ocx models order set (--models <csv> | --mode <default|alphabetical|provider|most-used>) [--json]`
 
-Replace the routed picker order with an explicit list or sort mode.
+Replace the complete picker order with an explicit list or sort mode.
 
 State-changing: yes. JSON mode: `envelope`.
 
@@ -964,11 +964,11 @@ State-changing: yes. JSON mode: `envelope`.
 
 | Flag | Value | Meaning |
 |---|---|---|
-| `--models` | string | Complete unique routed candidate permutation, preserving the exact featured prefix; exclusive with --mode. |
-| `--mode` | string | default clears; alphabetical, provider and most-used compute complete routed orders. |
+| `--models` | string | Complete unique visible candidate permutation, including native and featured models; exclusive with --mode. |
+| `--mode` | string | default clears; alphabetical, provider and most-used compute complete picker orders. |
 | `--json` | boolean | Emit the validated command result as JSON. |
 
-- Manual/preset replacement refuses a native-inclusive saved order until explicit reset/default. It never edits the featured models/force fields.
+- Manual/preset replacement includes native models and can move featured rows. It never edits the featured models/force fields.
 - Manual mode rechecks settings and identities before PUT and refuses observed drift; this is not server CAS. Raw/encoded ambiguities and missing identities refuse before writing.
 - Most-used reads all/all usage, uses requested model identities and refuses incomplete evidence. Presets retain unranked candidates. A saved receipt does not prove client convergence.
 

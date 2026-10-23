@@ -432,10 +432,10 @@ Data keys authorize only the data matrix and authenticated catalog. Admin creden
 
 ### Model picker ordering settings
 
-`GET /api/subagent-models` retains `chosen`, `available`, and `catalogState`, and adds routed-only
+`GET /api/subagent-models` retains `chosen`, `available`, and `catalogState`, and adds complete visible-model
 `pickerAvailable`, saved `pickerOrder`, and nullable `pickerOrderMode`. `available` still includes
-saved disabled/missing roster choices; it is not the eligible-picker set. Bare aliases are excluded
-from the routed preset surface because a bare id activates complete Codex-picker ordering.
+saved disabled/missing roster choices; it is not the eligible-picker set. Native models and bare
+aliases join routed rows through the same management-row projection in GET and PUT. Every row can move; featured membership is only a label.
 
 PUT accepts `models` and/or `pickerOrder`; `pickerOrderMode` requires `pickerOrder` and accepts
 `alphabetical`, `provider`, `most-used`, or null. Roster arrays keep their existing exact string

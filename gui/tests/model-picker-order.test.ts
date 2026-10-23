@@ -32,11 +32,11 @@ test("ambiguous raw identity does not choose a catalog row", () => {
     { provider: "p", id: "upstream", namespaced: "p/a" }, { provider: "p", id: "upstream", namespaced: "p/b" },
   ])).toEqual(["p/a", "p/b"]);
 });
-test("saved mode is snapshot provenance across roster drift; full native orders remain Custom", () => {
+test("saved mode is snapshot provenance across roster drift; native presets retain provenance", () => {
   expect(modelPickerOrderMode(models, [])).toBe("default");
   expect(modelPickerOrderMode(models, ["alpha/alpha", "alpha/zeta", "zeta/beta"])).toBe("provider");
   expect(modelPickerOrderMode([...models, "new/model"], ["gone/model", "alpha/zeta"], "most-used")).toBe("most-used");
-  expect(modelPickerOrderMode(models, ["gpt-5.5", "alpha/zeta"], "most-used")).toBe("custom");
+  expect(modelPickerOrderMode(models, ["gpt-5.5", "alpha/zeta"], "most-used")).toBe("most-used");
   expect(modelPickerOrderMode(models, ["alpha/zeta"])).toBe("custom");
 });
 test("transport guards reject missing/malformed state instead of synthesizing a successful reset", () => {
@@ -90,15 +90,15 @@ test("Custom normalizes exact canonical names before provider/raw aliases, witho
   expect(normalizePickerIds(["p/team/model"], ["p/team/model", "p/team-model"], identities)).toEqual(["p/team/model"]);
 });
 
-test("featured rank wins, survivors retain saved order, newcomers follow GET candidate order", () => {
+test("saved rank wins over featured, survivors retain saved order, newcomers follow GET candidate order", () => {
   expect(customPickerRows({ pickerAvailable: ["p/new", "p/b", "p/a", "p/top", "p/b"],
     chosen: ["native", "p/top", "p/a", "missing/model"], pickerOrder: ["gone/model", "p/b", "p/a"], pickerOrderMode: null,
-  }, ["new", "b", "a", "top"].map(id => ({ provider: "p", id, namespaced: `p/${id}` })))).toEqual({ fixed: ["p/top", "p/a"], order: ["p/top", "p/a", "p/b", "p/new"] });
+  }, ["new", "b", "a", "top"].map(id => ({ provider: "p", id, namespaced: `p/${id}` })))).toEqual({ featured: ["p/top", "p/a"], order: ["p/b", "p/a", "p/top", "p/new"] });
   expect(customPickerRows({ pickerAvailable: [], chosen: [], pickerOrder: [], pickerOrderMode: null }, []))
-    .toEqual({ fixed: [], order: [] });
+    .toEqual({ featured: [], order: [] });
 });
 
-test("unknown chosen cannot edit; malformed supplied chosen rejects; native saved ids remain untouched", () => {
+test("unknown chosen cannot edit; malformed supplied chosen rejects; native saved ids need a current candidate", () => {
   const settings = { pickerAvailable: ["p/a"], pickerOrder: ["native", "p/a"], pickerOrderMode: null };
   expect(isPickerOrderSettings(settings)).toBe(true);
   expect(customPickerRows(settings, [])).toBeNull();
@@ -123,16 +123,16 @@ test("snapshot binds base, activation, candidate sequence, chosen, saved order a
 });
 
 test("drop-before re-finds target after removal, while keyboard Down swaps adjacent movable rows", () => {
-  const order = ["p/featured", "p/a", "p/b", "p/c"], fixed = ["p/featured"];
-  expect(movePickerBefore(order, "p/a", "p/c", fixed)).toEqual(["p/featured", "p/b", "p/a", "p/c"]);
-  expect(movePickerBefore(order, "p/c", "p/a", fixed)).toEqual(["p/featured", "p/c", "p/a", "p/b"]);
-  expect(movePickerBefore(order, "p/a", "p/b", fixed)).toEqual(order);
-  expect(stepPickerOrder(order, "p/a", 1, fixed)).toEqual(["p/featured", "p/b", "p/a", "p/c"]);
-  expect(stepPickerOrder(order, "p/c", -1, fixed)).toEqual(["p/featured", "p/a", "p/c", "p/b"]);
-  for (const [source, target] of [["outside", "p/a"], ["p/a", "outside"], ["p/a", "p/a"], ["p/featured", "p/b"], ["p/b", "p/featured"]])
-    expect(movePickerBefore(order, source!, target!, fixed)).toEqual(order);
-  expect(stepPickerOrder(order, "p/a", -1, fixed)).toEqual(order);
-  expect(stepPickerOrder(order, "p/c", 1, fixed)).toEqual(order);
+  const order = ["p/featured", "p/a", "p/b", "p/c"];
+  expect(movePickerBefore(order, "p/a", "p/c")).toEqual(["p/featured", "p/b", "p/a", "p/c"]);
+  expect(movePickerBefore(order, "p/c", "p/a")).toEqual(["p/featured", "p/c", "p/a", "p/b"]);
+  expect(movePickerBefore(order, "p/a", "p/b")).toEqual(order);
+  expect(stepPickerOrder(order, "p/a", 1)).toEqual(["p/featured", "p/b", "p/a", "p/c"]);
+  expect(stepPickerOrder(order, "p/c", -1)).toEqual(["p/featured", "p/a", "p/c", "p/b"]);
+  for (const [source, target] of [["outside", "p/a"], ["p/a", "outside"], ["p/a", "p/a"], ["outside", "p/featured"]])
+    expect(movePickerBefore(order, source!, target!)).toEqual(order);
+  expect(stepPickerOrder(order, "p/a", -1)).toEqual(["p/a", "p/featured", "p/b", "p/c"]);
+  expect(stepPickerOrder(order, "p/c", 1)).toEqual(order);
   expect(order).toEqual(["p/featured", "p/a", "p/b", "p/c"]);
 });
 
@@ -145,7 +145,7 @@ test("blank roster strings retain GET compatibility and preset provenance withou
     expect(normalizePickerIds(settings.chosen, models, [])).toEqual([]);
     const identities = [{ provider: "alpha", id: "alpha", namespaced: "alpha/alpha" },
       { provider: "alpha", id: "zeta", namespaced: "alpha/zeta" }, { provider: "zeta", id: "beta", namespaced: "zeta/beta" }];
-    expect(customPickerRows(settings, identities)).toEqual({ fixed: [], order: ["alpha/alpha", "alpha/zeta", "zeta/beta"] });
+    expect(customPickerRows(settings, identities)).toEqual({ featured: [], order: ["alpha/alpha", "alpha/zeta", "zeta/beta"] });
     expect(modelPickerOrderMode(models, settings.pickerOrder, settings.pickerOrderMode)).toBe("provider");
     expect(modelPickerOrder("alphabetical", settings.pickerAvailable)).toEqual(["alpha/alpha", "zeta/beta", "alpha/zeta"]);
     expect(settings.chosen).toEqual([blank]); // Normalization must not rewrite the saved roster.
@@ -166,7 +166,7 @@ test("incomplete or ambiguous catalog identities block projection, even with can
     expect(customPickerRows(settings, identities)).toBeNull();
   }
   expect(pickerIdentityCoverage(settings.pickerAvailable, [team, a, { ...team }])).toBe(true);
-  expect(customPickerRows(settings, [team, a])).toEqual({ fixed: ["p/team-model"], order: ["p/team-model", "p/a"] });
+  expect(customPickerRows(settings, [team, a])).toEqual({ featured: ["p/team-model"], order: ["p/team-model", "p/a"] });
 });
 
 test("featured ranks use last duplicate, exact canonical precedence, and untrimmed roster strings", () => {
@@ -174,13 +174,13 @@ test("featured ranks use last duplicate, exact canonical precedence, and untrimm
     { provider: "p", id: "a", namespaced: "p/a" }, { provider: "p", id: "b", namespaced: "p/b" }];
   const settings = { pickerAvailable: ["p/team-model", "p/a", "p/b"], pickerOrder: [], pickerOrderMode: null };
   expect(customPickerRows({ ...settings, chosen: ["p/a", "p/b", "p/a"] }, identities))
-    .toEqual({ fixed: ["p/b", "p/a"], order: ["p/b", "p/a", "p/team-model"] });
+    .toEqual({ featured: ["p/b", "p/a"], order: ["p/b", "p/a", "p/team-model"] });
   expect(customPickerRows({ ...settings, chosen: ["p/team/model", "p/b", "p/team-model"] }, identities))
-    .toEqual({ fixed: ["p/b", "p/team-model"], order: ["p/b", "p/team-model", "p/a"] });
+    .toEqual({ featured: ["p/b", "p/team-model"], order: ["p/b", "p/team-model", "p/a"] });
   expect(customPickerRows({ ...settings, chosen: ["p/team-model", "p/b", "p/team/model"] }, identities))
-    .toEqual({ fixed: ["p/team-model", "p/b"], order: ["p/team-model", "p/b", "p/a"] });
+    .toEqual({ featured: ["p/team-model", "p/b"], order: ["p/team-model", "p/b", "p/a"] });
   const chosen = [" p/a ", "", "  "];
   expect(customPickerRows({ ...settings, chosen, pickerOrder: [" p/a "] }, identities))
-    .toEqual({ fixed: [], order: ["p/a", "p/team-model", "p/b"] });
+    .toEqual({ featured: [], order: ["p/a", "p/team-model", "p/b"] });
   expect(chosen).toEqual([" p/a ", "", "  "]);
 });

@@ -7,6 +7,9 @@ Le sélecteur de modèles Codex ne conserve ni l’ordre de déclaration des fou
 configuration opencodex. L’ordre final découle des priorités du catalogue ; les modèles routés qui partagent la même priorité
 sont classés selon un ordre alphabétique déterministe.
 
+
+`modelPickerOrder` ordonne tous les modèles disponibles, favoris et modèles natifs compris. Toute liste non vide place les identifiants indiqués en tête, dans cet ordre ; les autres suivent leur priorité naturelle. Aucun identifiant natif n’est nécessaire pour activer ce comportement. Utilisez les identifiants exacts du catalogue, avec le selector pour les lignes liées à un compte.
+
 ## La règle Codex s'applique
 
 Le gestionnaire de modèles de Codex trie les entrées de catalogue visibles dans le sélecteur par `priority`, dans l’ordre croissant. Il
@@ -29,7 +32,6 @@ Sans ordre global du sélecteur, les priorités sans sélecteur pertinentes sont
 | --- | --- : | --- |
 | `subagentModels[i]` | `i` (`0` à `4`) | La carte de classement présentée dans `src/codex/catalog/sync.ts` |
 | Autres modèles acheminés | `5` | Création d'une entrée routé dans `src/codex/catalog/sync.ts` |
-| Modèles routés non mis en avant et présents dans `modelPickerOrder` | `1000 + i` | Rang d’affichage du sélecteur dans `src/codex/catalog/sync.ts` |
 | Slugs GPT natifs par défaut | `9` | Création d'entrées natives dans `src/codex/catalog/sync.ts` |
 | Modèles natifs non sélectionnés alors qu'une liste sélectionnée existe | Au moins `featured.length + 100` | Fusion du catalogue natif dans `src/codex/catalog/sync.ts` |
 
@@ -160,29 +162,10 @@ y compris les lignes mises en avant. Supprimez ces identifiants pour conserver l
 comportement limité aux lignes routées. Les listes absentes, vides ou uniquement routées
 conservent leur comportement ; le calcul des candidats pour les consignes d’OpenCodex selon les priorités naturelles reste inchangé.
 
-`modelPickerOrder` préserve le calcul d’OpenCodex qui retient jusqu’à cinq candidats préférés
-pour les consignes aux sous-agents, selon leur priorité naturelle. Chaque ligne déplacée conserve
-cette priorité séparément de son `priority` natif ; changer uniquement l’ordre du sélecteur ne doit
-pas modifier ce calcul. Cela ne restreint pas l’admissibilité d’un modèle désigné par son nom exact :
-la liste annoncée n’est pas une liste d’autorisation. Les contraintes d’authentification, de modèle,
-d’effort et de backend restent applicables.
+`modelPickerOrder` ordonne tous les modèles disponibles, favoris et modèles natifs compris. Toute liste non vide place les identifiants indiqués en tête, dans cet ordre ; les autres suivent leur priorité naturelle. Aucun identifiant natif n’est nécessaire pour activer ce comportement. Utilisez les identifiants exacts du catalogue, avec le selector pour les lignes liées à un compte.
 
-Codex natif utilise le `priority` natif pour annoncer les cinq premiers modèles admissibles et
-visibles dans le sélecteur via `spawn_agent`, en V1 et en V2 lorsque les substitutions de modèle
-sont exposées. Ces cinq modèles peuvent donc changer avec l’ordre du sélecteur, même si les
-candidats préférés d’OpenCodex restent identiques. La V1 ne reçoit aucune injection de liste
-préférée d’OpenCodex. La V2 peut recevoir en plus des consignes fondées sur les priorités naturelles
-si l’état du catalogue client le permet ; ces consignes ne réordonnent pas la liste annoncée par
-l’outil natif.
+Dans **Models → Custom order**, déplacez n’importe quelle ligne par glisser-déposer ou avec les boutons haut/bas, puis enregistrez. Le badge favori ne verrouille aucune position. Les nouveaux modèles suivent l’ordre enregistré. Les préréglages par nom, fournisseur ou usage incluent aussi les modèles natifs ; l’usage reste un instantané. Les anciennes listes uniquement routées priment désormais sur les favoris. Default rétablit l’ordre naturel.
 
-`disabledModels` et `selectedModels` de chaque fournisseur
-restent des champs de visibilité, pas des contrôles d’ordre. Il n’existe aucun paramètre distinct
-`modelOrder`, `providerOrder` ou de carte de priorité.
+`pickerAvailable` et la validation des écritures utilisent le même ensemble visible. L’ordre ne modifie ni `subagentModels` ni les replis. Le classement naturel du guidage OpenCodex est conservé, mais les cinq choix annoncés par `spawn_agent` dans Codex peuvent changer ; ils ne constituent pas une liste d’autorisation.
 
-## Préréglages du sélecteur
-
-Dans **Models**, choisissez Par défaut, A–Z par modèle, Par fournisseur ou Instantané des usages, puis appliquez l’ordre. Les identifiants routés actuellement disponibles et `modelPickerOrderMode` (`alphabetical`, `provider`, `most-used`) sont enregistrés. Les usages conservés sont lus une seule fois lors de l’application ; un rechargement ou un changement de modèles ne recalcule rien. Un ordre personnalisé ou natif complet reste intact jusqu’à une application explicite. Par défaut efface les deux champs même sans modèle disponible.
-
-`GET/PUT /api/subagent-models` conserve les choix enregistrés désactivés ou absents dans `chosen` et `available` ; `pickerAvailable` contient les identifiants routés admissibles. Models envoie `pickerOrder` et `pickerOrderMode`, jamais `models`. Une sauvegarde du roster seul conserve l’ordre. Entrée invalide ou échec de sauvegarde préserve l’état précédent.
-
-Les plages prioritaires et natives restent en place. Les préréglages affectent le catalogue Codex et les groupes routés de la découverte Claude, sans modifier le préfixe natif Claude ni les profils Desktop explicites ou la propriété des alias. Les rangs de guidage OpenCodex et les réglages de repli sont conservés ; les cinq choix annoncés nativement par Codex et le défaut recommandé peuvent changer. Aucun client n’est redémarré ; une actualisation peut rester en attente et nécessiter de rouvrir le client.
+Un contrôle avant sauvegarde conserve le brouillon en cas de conflit et exige un rechargement. Si le catalogue reste en attente, rouvrez Codex. Le préfixe natif de Claude reste inchangé. [Détails](/guides/model-ordering/).

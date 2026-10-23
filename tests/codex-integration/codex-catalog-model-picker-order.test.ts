@@ -206,12 +206,12 @@ describe("modelPickerOrder (#1649)", () => {
 });
 
 
-describe("routed picker projection preserves existing priority bands", () => {
+describe("routed picker projection honors complete display order", () => {
   const rows = ["a", "b", "c", "d"].map(id => ({ provider: "p", id }));
-  test("featured and unlisted rows precede the listed band without mutating input", () => {
+  test("listed rows override featured ranks without mutating input", () => {
     const before = structuredClone(rows);
     expect(orderForModelPicker(rows, ["p/d", "p/b", "p/a"], ["p/a"]).map(row => row.id))
-      .toEqual(["a", "c", "d", "b"]);
+      .toEqual(["d", "b", "a", "c"]);
     expect(rows).toEqual(before);
     expect(orderForModelPicker(rows, []).map(row => row.id)).toEqual(["a", "b", "c", "d"]);
   });
@@ -221,7 +221,7 @@ describe("routed picker projection preserves existing priority bands", () => {
       ["gpt-5.5", "p/team-model", "p/other", "p/team/model"], ["p/other"]).map(row => row.id))
       .toEqual(["team/model", "other"]);
   });
-  test("native alias keeps its natural band for routed-only orders", () => {
+  test("listed native alias follows its explicit rank", () => {
     const alias = { provider: "combo", id: "native", alias: "native/model", nativeAlias: true };
     expect(orderForModelPicker([...rows, alias], ["native/model", "p/d", "p/c", "p/b", "p/a"])[0]).toBe(alias);
   });

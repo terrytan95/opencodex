@@ -9,7 +9,7 @@ import {
 } from "../model-picker-order";
 
 type Receipt = PickerOrderSaved & { catalogRefresh?: unknown };
-type Snapshot = { signature: string; identities: string; order: string[]; fixed: string[] };
+type Snapshot = { signature: string; identities: string; order: string[]; featured: string[] };
 const DRAG_TYPE = "application/x-ocx-picker-order";
 let dragSequence = 0;
 /** Local drag identity, not a security token. Like newClientId, supports LAN HTTP. */
@@ -91,8 +91,7 @@ export default function ModelPickerOrderEditor({ apiBase, active, identities, on
       }
       const rows = customPickerRows(settings, identities);
       if (!rows) {
-        setBlocked(settings.pickerOrder.some(id => !id.includes("/"))
-          ? "models.pickerOrder.nativeLocked" : settings.chosen === undefined
+        setBlocked(settings.chosen === undefined
             ? "models.pickerOrder.unknownChosen" : "models.pickerOrder.catalogRequired");
         return;
       }
@@ -134,8 +133,8 @@ export default function ModelPickerOrderEditor({ apiBase, active, identities, on
     clearDrag();
   };
   const draftSet = new Set(draft);
-  const fixedSet = new Set(snapshot?.fixed);
-  const movable = (id: string) => !disabled && draftSet.has(id) && !fixedSet.has(id);
+  const featuredSet = new Set(snapshot?.featured);
+  const movable = (id: string) => !disabled && draftSet.has(id);
   const dragOver = (event: DragEvent<HTMLLIElement>, id: string) => {
     if (!lifetime.current.drag || lifetime.current.drag.id === id || !movable(lifetime.current.drag.id) || !movable(id)
       || !event.dataTransfer.types.includes(DRAG_TYPE)) return;
@@ -148,18 +147,18 @@ export default function ModelPickerOrderEditor({ apiBase, active, identities, on
     {snapshot && draft.length === 0 && <p>{t("models.pickerOrder.empty")}</p>}
     <ol className="picker-order-list">
       {draft.map((id, index) => {
-        const fixed = fixedSet.has(id);
+        const featured = featuredSet.has(id);
         return <li key={id} className={`picker-order-row${dragging === id ? " cwi-target-row--dragging" : ""}${over === id ? " cwi-target-row--drop" : ""}`}
           onDragOver={event => dragOver(event, id)}
           onDragLeave={() => setOver(null)}
           onDrop={event => {
             const source = lifetime.current.drag;
             if (source && source.id !== id && source.token === event.dataTransfer.getData(DRAG_TYPE) && movable(source.id) && movable(id)) {
-              event.preventDefault(); move(source.id, movePickerBefore(draft, source.id, id, snapshot?.fixed ?? []));
+              event.preventDefault(); move(source.id, movePickerBefore(draft, source.id, id));
             }
             clearDrag();
           }} onDragEnd={clearDrag}>
-          <button type="button" className="cwi-target-grip" disabled={disabled || fixed} draggable={!disabled && !fixed}
+          <button type="button" className="cwi-target-grip" disabled={disabled} draggable={!disabled}
             aria-label={t("models.pickerOrder.dragModel", { model: id })}
             onDragStart={event => {
               if (!movable(id)) { event.preventDefault(); return; }
@@ -167,17 +166,17 @@ export default function ModelPickerOrderEditor({ apiBase, active, identities, on
               event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData(DRAG_TYPE, token);
             }}><IconGrip width={14} height={14} aria-hidden="true" /></button>
           <code className="picker-order-name">{id}</code>
-          {fixed && <span className="muted text-caption">{t("models.pickerOrder.featured")}</span>}
+          {featured && <span className="muted text-caption">{t("models.pickerOrder.featured")}</span>}
           <span className="picker-order-actions">
             <button type="button" className="btn btn-ghost btn-sm"
-              disabled={disabled || fixed || index === 0 || fixedSet.has(draft[index - 1]!)}
+              disabled={disabled || index === 0}
               aria-label={t("models.pickerOrder.upModel", { model: id })}
-              onClick={() => move(id, stepPickerOrder(draft, id, -1, snapshot?.fixed ?? []))}>
+              onClick={() => move(id, stepPickerOrder(draft, id, -1))}>
               <IconArrowUp width={14} height={14} aria-hidden="true" /></button>
             <button type="button" className="btn btn-ghost btn-sm"
-              disabled={disabled || fixed || index === draft.length - 1 || fixedSet.has(draft[index + 1]!)}
+              disabled={disabled || index === draft.length - 1}
               aria-label={t("models.pickerOrder.downModel", { model: id })}
-              onClick={() => move(id, stepPickerOrder(draft, id, 1, snapshot?.fixed ?? []))}>
+              onClick={() => move(id, stepPickerOrder(draft, id, 1))}>
               <IconArrowDown width={14} height={14} aria-hidden="true" /></button>
           </span>
         </li>;

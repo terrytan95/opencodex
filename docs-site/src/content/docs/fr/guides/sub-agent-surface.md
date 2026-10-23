@@ -78,7 +78,7 @@ Les emplacements complétés sont des annonces ordinaires : l'agent principal p
 
 - Mettez cinq modèles en avant. Une liste complète ne laisse aucun emplacement à compléter.
 - Désactivez un modèle que vous ne voulez jamais voir proposé, ou retirez-le des `selectedModels` de son fournisseur. Un modèle désactivé ou non sélectionné quitte le sélecteur et ne peut pas compléter un emplacement.
-- `modelPickerOrder` modifie les priorités que Codex utilise pour trier. Une liste uniquement routée déplace les lignes listées non mises en avant à `1000` et au-delà ; les lignes routées non listées complètent donc les emplacements en premier. Une liste qui contient un identifiant natif nu ordonne tout le sélecteur, lignes mises en avant comprises : les lignes listées passent en premier et occupent les emplacements annoncés avant toute ligne non listée. Voir [Model ordering](/guides/model-ordering/).
+- `modelPickerOrder` ordonne tous les modèles disponibles, favoris et modèles natifs compris. Toute liste non vide place les identifiants indiqués en tête, dans cet ordre ; les autres suivent leur priorité naturelle. Aucun identifiant natif n’est nécessaire pour activer ce comportement. Utilisez les identifiants exacts du catalogue, avec le selector pour les lignes liées à un compte.
 
 En v2, Codex écarte les lignes épinglées `"disabled"` avant de prendre les cinq ; le reste fonctionne de la même façon. La liste des consignes v2 d'opencodex (`{{roster}}`) ne nomme que les modèles configurés présents parmi les cinq : les modèles de complément apparaissent dans la description de l'outil Codex, jamais dans les consignes d'opencodex. Codex lit le catalogue au démarrage d'une session ; une modification de la liste s'applique donc aux nouvelles sessions.
 

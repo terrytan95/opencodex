@@ -1282,19 +1282,18 @@ ocx models order set --models '<complete-public-id-permutation>' --json
 ocx models order status --json
 ```
 
-Manual ordering uses the public IDs in `pickerAvailable`, every routed candidate
-exactly once, with current featured models in their exact required leading order.
+Manual ordering uses the public IDs in `pickerAvailable`, every visible native and routed candidate
+exactly once. Featured models can move to any position.
 Blank, duplicate, missing, unknown and ambiguous entries refuse. The CLI re-reads
 settings and model identities immediately before the manual PUT; changed state
 returns conflict. This is an observational check, not CAS, so read back afterward.
 It never silently drops native identities or modifies featured selection.
 
 Alternatively select `--mode alphabetical`, `--mode provider`, or `--mode most-used`.
-These presets do not prepend the manual featured prefix. Most-used reads all-time,
+These presets include native and featured models. Most-used reads all-time,
 all-surface usage, retains unranked candidates, and refuses incomplete history.
-Both manual and non-default modes refuse saved orders containing bare native IDs.
-If clearing that saved order is intended, use `ocx models order reset --json` or
-`ocx models order set --mode default --json` first. Do not auto-reset on refusal.
+Native-inclusive orders can be edited directly. To clear saved ordering, use
+`ocx models order reset --json` or `ocx models order set --mode default --json`.
 
 Live custom and order writes include `catalogRefresh`. Only committed,
 nondegraded refresh exits 0; skipped, failed or degraded refresh returns the saved

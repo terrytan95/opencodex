@@ -79,7 +79,7 @@ Doldurulan yuvalar sıradan sunumlardır; ana ajan bu modellerden birini seçebi
 
 - Beş model öne çıkarın. Kadro doluysa doldurulacak yuva kalmaz.
 - Hiç sunulmasını istemediğiniz bir modeli devre dışı bırakın ya da sağlayıcısının `selectedModels` listesine eklemeyin. Devre dışı ya da seçilmemiş bir model seçiciden çıkar ve yuva dolduramaz.
-- `modelPickerOrder`, Codex'in sıralamada kullandığı öncelikleri değiştirir. Yalnızca yönlendirilmiş satırlardan oluşan bir liste, listelenen öne çıkarılmamış satırları `1000` ve üzerine taşır; bu yüzden listelenmemiş yönlendirilmiş satırlar yuvaları önce doldurur. Yalın bir yerel kimlik içeren liste, öne çıkarılan satırlar dahil tüm seçiciyi sıralar: listelenen satırlar önce gelir ve listelenmemiş her satırdan önce sunulan yuvaları alır. Bkz. [Model ordering](/guides/model-ordering/).
+- `modelPickerOrder`, öne çıkan ve yerel modeller dahil tüm kullanılabilir modelleri sıralar. Boş olmayan her listede belirtilen kimlikler dizi sırasıyla önce gelir; diğerleri doğal önceliklerini izler. Bunu etkinleştirmek için yerel kimlik gerekmez. Hesaba özel satırlar için selector dahil tam katalog kimliğini kullanın.
 
 v2'de Codex beşi almadan önce `"disabled"` olarak sabitlenmiş satırları atlar; geri kalanı aynı şekilde çalışır. opencodex v2 yönlendirmesindeki kadro (`{{roster}}`) yalnızca beşin içindeki yapılandırılmış kadro modellerini adlandırır; dolgu modelleri Codex'in araç açıklamasında görünür, opencodex yönlendirmesinde hiç görünmez. Codex kataloğu oturum başlarken okur; bu yüzden kadro değişikliği yeni oturumlarda geçerli olur.
 

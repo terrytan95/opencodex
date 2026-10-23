@@ -81,7 +81,7 @@ describe("pure picker projections", () => {
     const ids = [{ provider: "p", id: "raw/a", namespaced: "p/a" }, { provider: "p", id: "raw/b", namespaced: "p/b" }];
     const settings = { pickerAvailable: ["p/a", "p/b"], pickerOrder: [], pickerOrderMode: null,
       chosen: ["p/a", "p/b", "p/a", "p/raw/b"] };
-    expect(cli.customPickerRows(settings, ids)?.fixed).toEqual(["p/b", "p/a"]);
+    expect(cli.customPickerRows(settings, ids)?.featured).toEqual(["p/b", "p/a"]);
   });
   test("GUI conformance: modes, manual normalization, fixed prefix and identity ambiguity", () => {
     const variants: cli.PickerModelIdentity[][] = [identities,
@@ -123,6 +123,15 @@ describe("models order commands", () => {
     expect(result()).toEqual({ ...initial, pickerOrder: ["native", "beta/z"], chosen: ["native"] });
     expect(f.calls).toHaveLength(1); expect(f.resolutions()).toBe(1);
   });
+  test("native and featured candidates can be mixed without resetting the saved order", async () => {
+    const settings = { ...initial, pickerAvailable: ["gpt-5.5", ...candidates],
+      pickerOrder: ["gpt-5.5", ...candidates], chosen: ["beta/z"] };
+    const f = fixture({ settings, models: [...identities, { provider: "openai", id: "gpt-5.5", namespaced: "gpt-5.5" }] });
+    const order = ["alpha/a", "gpt-5.5", "beta/z", "alpha/b"];
+    expect(await handleModelsOrderCommand(["set", `--models=${order.join(",")}`], f.deps)).toBe(0);
+    expect(f.writes()[0]?.body).toEqual({ pickerOrder: order, pickerOrderMode: null });
+    expect(settings.chosen).toEqual(["beta/z"]);
+  });
   test("unknown chosen remains unknown in status", async () => {
     const { chosen: _, ...settings } = initial;
     expect(await handleModelsOrderCommand(["status"], fixture({ settings }).deps)).toBe(0);
@@ -145,7 +154,7 @@ describe("models order commands", () => {
     expect(await handleModelsOrderCommand(["set", "--models=p/org/a,p/org-a"], duplicate.deps)).toBe(2);
     expect(duplicate.writes()).toEqual([]);
   });
-  for (const settings of [null, {}, { ...initial, chosen: null }, { ...initial, pickerAvailable: ["native"] },
+  for (const settings of [null, {}, { ...initial, chosen: null },
     { ...initial, pickerAvailable: ["alpha/a", "alpha/a"] }, { ...initial, pickerOrderMode: "custom" }]) {
     test(`malformed settings refuse status ${JSON.stringify(settings)}`, async () => {
       const f = fixture({ settings }); expect(await handleModelsOrderCommand(["status", "--json"], f.deps)).toBe(1);
@@ -187,7 +196,7 @@ describe("models order commands", () => {
     });
   }
   for (const args of [["set", "--models=alpha/a,alpha/b,beta/z"], ["set", "--mode=provider"]]) {
-    for (const settings of [{ ...initial, pickerOrder: ["native", "alpha/a"] }, { ...initial, pickerAvailable: [] }]) {
+    for (const settings of [{ ...initial, pickerAvailable: [] }]) {
       test(`refuses native/empty replacement ${JSON.stringify([args, settings.pickerAvailable])}`, async () => {
         const f = fixture({ settings });
         expect(await handleModelsOrderCommand(args, f.deps)).toBe(2); expect(f.writes()).toEqual([]);
@@ -200,10 +209,10 @@ describe("models order commands", () => {
       expect(f.writes()).toEqual([]);
     });
   }
-  test("refuses changed featured prefix", async () => {
+  test("allows moving featured models away from the prefix", async () => {
     const f = fixture({ settings: { ...initial, chosen: ["beta/z"] } });
-    expect(await handleModelsOrderCommand(["set", "--models=alpha/a,alpha/b,beta/z"], f.deps)).toBe(2);
-    expect(f.writes()).toEqual([]);
+    expect(await handleModelsOrderCommand(["set", "--models=alpha/a,alpha/b,beta/z"], f.deps)).toBe(0);
+    expect(f.writes()[0]?.body?.pickerOrder).toEqual(["alpha/a", "alpha/b", "beta/z"]);
   });
   test("refuses unknown chosen and identity ambiguity", async () => {
     const { chosen: _, ...settings } = initial;

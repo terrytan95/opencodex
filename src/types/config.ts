@@ -683,9 +683,8 @@ export interface OcxConfig {
   subagentModelsVersion?: number;
   /**
    * Display-only order for the Codex picker, independent of subagentModels.
-   * Routed-only lists order non-featured routed rows; featured and native rows keep
-   * their normal positions. Including a bare native id opts into ordering the complete
-   * picker: listed ids appear first in array order, followed by unlisted rows in their
+   * All listed ids, including featured and native models, appear first in array
+   * order, followed by unlisted rows in their
    * natural priority order. Exact catalog ids take precedence over equivalent raw/encoded
    * routed ids; empty entries are ignored. The separate natural priority used by
    * OpenCodex guidance is preserved. Native Codex's advertised five follow display

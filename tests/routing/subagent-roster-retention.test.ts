@@ -156,7 +156,9 @@ describe("picker updates preserve roster and persistence intent", () => {
     const result = await res!.json() as { available: string[]; pickerAvailable: string[] };
     expect(result.available).toContain("alpha/one");
     expect(result.available).toContain("beta/two");
-    expect(result.pickerAvailable).toEqual([]);
+    expect(result.pickerAvailable).toContain("gpt-5.5");
+    expect(result.pickerAvailable).not.toContain("alpha/one");
+    expect(result.pickerAvailable).not.toContain("beta/two");
     for (const id of ["alpha/one", "beta/two"]) {
       expect((await handleAgentSettingsRoutes(context(config, { pickerOrder: [id] })))?.status).toBe(400);
     }
@@ -166,6 +168,13 @@ describe("picker updates preserve roster and persistence intent", () => {
     const ok = context(config, { pickerOrder: ["gpt-5.5", "beta/two"] });
     expect((await handleAgentSettingsRoutes(ok))?.status).toBe(200);
     expect(config.modelPickerOrder).toEqual(["gpt-5.5", "beta/two"]);
+    const get = context(config, {});
+    get.req = new Request(get.url);
+    const saved = await (await handleAgentSettingsRoutes(get))!.json();
+    expect(saved.pickerAvailable).toContain("gpt-5.5");
+    expect(saved.pickerAvailable).toContain("beta/two");
+    expect(saved.pickerOrder).toEqual(["gpt-5.5", "beta/two"]);
+    expect(saved.chosen).toEqual(["keep"]);
     const disabled = makeConfig({ disabledModels: ["gpt-5.5"] });
     const before = structuredClone(disabled);
     const rejected = context(disabled, { pickerOrder: ["gpt-5.5"] });
