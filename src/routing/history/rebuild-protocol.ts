@@ -8,6 +8,8 @@ export type RebuildWorkerRequest = {
   buildPath: string;
   reason: string;
   revision: UsageLogRevision;
+  /** When present, seed the private build from the existing index and ingest only its tail. */
+  fromOffset?: number;
 };
 
 export type RebuildWorkerReply =

@@ -267,21 +267,18 @@ function computeHistoricalHealthEvidence(
        ORDER BY timestamp DESC LIMIT ?`,
     ).all(...values, HEALTH_MAX_SAMPLES) as HealthRow[];
     // Rows whose top-level target differs from this candidate may still carry
-    // candidate attempts (combo/failover): expand those too. The serialized
-    // provider/model LIKE prefilter keeps the LIMIT from being consumed by
-    // rows that cannot contribute samples for this candidate.
-    const escapeLike = (value: string): string => value.replace(/[\\%_]/g, match => `\\${match}`);
+    // candidate attempts (combo/failover): use the indexed target projection.
     const attemptRows = handle.query(
-      `SELECT timestamp, row_json AS rowJson
-       FROM requests WHERE timestamp >= ? AND attempt_count > 1
-         AND row_json LIKE ? ESCAPE '\\'
-         AND row_json LIKE ? ESCAPE '\\'
-         AND NOT (provider = ? AND model = ?)
-       ORDER BY timestamp DESC LIMIT ?`,
+      `SELECT r.timestamp, r.row_json AS rowJson
+       FROM request_attempt_targets AS a
+       JOIN requests AS r ON r.request_id = a.request_id
+       WHERE a.provider = ? AND a.model = ? AND a.timestamp >= ?
+         AND NOT (r.provider = ? AND r.model = ?)
+       ORDER BY a.timestamp DESC LIMIT ?`,
     ).all(
+      input.provider,
+      input.model,
       now - HEALTH_WINDOW_MS,
-      `%\"provider\":\"${escapeLike(input.provider)}\"%`,
-      `%\"model\":\"${escapeLike(input.model)}\"%`,
       input.provider,
       input.model,
       HEALTH_MAX_SAMPLES,

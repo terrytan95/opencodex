@@ -51,6 +51,7 @@ function metaNumber(dbHandle: Database, key: string): number {
 }
 
 export function resetAndCreateSchema(dbHandle: Database): void {
+  dbHandle.exec("DROP TABLE IF EXISTS request_attempt_targets");
   dbHandle.exec("DROP TABLE IF EXISTS requests");
   dbHandle.exec("DROP TABLE IF EXISTS schema_meta");
   dbHandle.exec(HISTORY_DDL);
@@ -155,15 +156,21 @@ export function ingestSourceTail(
   options: IngestOptions = {},
 ): number {
   let inserted = 0;
-  let pending: Array<Array<string | number | null>> = [];
+  let pending: Array<{ row: Array<string | number | null>; targets: Array<[string, string, number, string]> }> = [];
   const insert = dbHandle.prepare(ROW_INSERT);
+  let insertTarget: ReturnType<Database["prepare"]> | undefined;
   let fd: number | undefined;
   try {
+    insertTarget = dbHandle.prepare(
+      "INSERT OR IGNORE INTO request_attempt_targets (provider, model, timestamp, request_id) VALUES (?, ?, ?, ?)",
+    );
     const commitBatch = () => {
-      dbHandle.transaction((rows: Array<Array<string | number | null>>) => {
-        for (const row of rows) {
+      dbHandle.transaction((rows: typeof pending) => {
+        for (const { row, targets } of rows) {
           // `changes` counts real inserts only; INSERT OR IGNORE replays add 0.
-          inserted += insert.run(...row).changes;
+          const changes = insert.run(...row).changes;
+          inserted += changes;
+          if (changes > 0) for (const target of targets) insertTarget!.run(...target);
         }
       })(pending);
       pending = [];
@@ -171,7 +178,15 @@ export function ingestSourceTail(
     const ingestLine = (line: Buffer) => {
       const entry = parsedEntryFromLine(line.toString("utf-8"));
       if (!entry) return;
-      pending.push(extractRow(entry));
+      const targets: Array<[string, string, number, string]> = [];
+      if (Array.isArray(entry.attempts) && entry.attempts.length > 1) {
+        for (const attempt of entry.attempts) {
+          if (typeof attempt?.provider === "string" && typeof attempt.model === "string") {
+            targets.push([attempt.provider, attempt.model, entry.timestamp, entry.requestId]);
+          }
+        }
+      }
+      pending.push({ row: extractRow(entry), targets });
       if (pending.length >= REQUEST_HISTORY_INSERT_BATCH) commitBatch();
     };
 
@@ -238,5 +253,6 @@ export function ingestSourceTail(
     // Windows file locks: an unterminated prepared statement keeps the DB
     // file busy after close (verified on Bun 1.3.14). Finalize always.
     insert.finalize();
+    insertTarget?.finalize();
   }
 }

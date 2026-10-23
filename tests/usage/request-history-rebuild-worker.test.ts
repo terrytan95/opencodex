@@ -4,7 +4,7 @@
  * close or a replaced ledger never leaves a partial index or a stray build file.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { handleManagementAPI } from "../../src/server/management-api";
@@ -180,6 +180,41 @@ describe("request-history worker rebuild (#6990)", () => {
     expect(meta.indexedRows).toBe(500);
     expect(openRequestHistoryIndexSync().indexedRows).toBe(500);
     expect(buildFilesLeft()).toEqual([]);
+  });
+
+  test("large appended tails use a private worker build without reparsing the indexed prefix", async () => {
+    writeLedger(ledgerLines(10, "prefix"));
+    await openRequestHistoryIndex();
+    requestHistoryDb().exec("CREATE TABLE preserved_marker (value TEXT)");
+    requestHistoryDb().exec("INSERT INTO preserved_marker VALUES ('seeded')");
+    const before = snapshotIndex();
+    appendFileSync(usageLogPath(), ledgerLines(2_000, "tail"));
+    let ticked = false;
+    setTimeout(() => { ticked = true; }, 0);
+    expect(() => openRequestHistoryIndexSync()).toThrow(RequestHistoryIndexBusyError);
+    const meta = await openRequestHistoryIndex();
+    expect(ticked).toBe(true);
+    expect(meta.indexedRows).toBe(2_010);
+    expect(meta.indexedOffset).toBe(currentUsageLogRevision()!.size);
+    expect(requestHistoryDb().query("SELECT value FROM preserved_marker").get()).toEqual({ value: "seeded" });
+    expect(snapshotIndex().rows.filter(row => row.request_id.startsWith("prefix"))).toEqual(before.rows);
+  });
+
+  test("closing during tail catch-up leaves the serving index unchanged", async () => {
+    writeLedger(ledgerLines(10, "prefix"));
+    await openRequestHistoryIndex();
+    const before = snapshotIndex();
+    appendFileSync(usageLogPath(), ledgerLines(2_000, "tail"));
+    const pending = openRequestHistoryIndex();
+    closeRequestHistoryIndex();
+    await expect(pending).rejects.toBeInstanceOf(RequestHistoryIndexClosedError);
+    expect(await waitFor(() => buildFilesLeft().length === 0)).toBe(true);
+    const { Database } = await import("bun:sqlite");
+    const untouched = new Database(indexPath(), { readonly: true });
+    try {
+      expect(untouched.query("SELECT count(*) AS count FROM requests").get()).toEqual({ count: before.rows.length });
+    } finally { untouched.close(); }
+    expect((await openRequestHistoryIndex()).indexedRows).toBe(2_010);
   });
 
   test("the build that reaches the wait limit still returns its index", async () => {
