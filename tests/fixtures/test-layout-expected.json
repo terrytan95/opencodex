@@ -1,4 +1,5 @@
 {
+  "integrations-asset-inventory.test.ts": "clients",
   "integrations-scenarios.test.ts": "clients",
   "routing-context-rules.test.ts": "routing",
   "codex-quota-pace.test.ts": "codex-integration",

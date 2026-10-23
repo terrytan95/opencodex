@@ -1009,3 +1009,16 @@ Codex preserves TOML comments. JSON clients preserve unrelated values and use th
 indentation. Missing, symlinked, malformed or unsupported configuration files are unavailable;
 no client files are created and JSONC comments are not discarded. Grok and other clients are not
 included in this initial snapshot format.
+
+
+## MCP and Skills inventory
+
+**Connect → MCP & Skills** lists supported global configuration sources for Codex, Claude Code,
+Grok and OpenCode. Search by name, client or path; **Needs attention** filters duplicate names,
+broken links and unreadable entries. Expand **Source** to see the installation location.
+
+The scan is read-only and never runs a server, installs a skill or contacts a provider. It lists
+metadata rather than MCP arguments, environment values or prompt text. **Scanned locations** shows
+what was inspected and what could not be read; project files, DSH and plugin-specific sources are
+not included. A partial badge means a source failed or a scan limit was reached. Results are cached
+for 30 seconds. Installed versions appear only when declared locally; update status remains unknown.

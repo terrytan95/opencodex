@@ -17,6 +17,7 @@ import FileIntegrationPage, {
 } from "./integrations/FileIntegrationPage";
 import { FILE_CLIENTS, TABS, type IntegrationTab } from "./integrations/integration-tabs";
 
+const AssetInventoryPage = lazy(() => import("./integrations/AssetInventoryPage"));
 const ScenariosPage = lazy(() => import("./integrations/ScenariosPage"));
 
 function readIntegrationTab(hash = window.location.hash): IntegrationTab {
@@ -46,7 +47,7 @@ function panelDomId(tab: IntegrationTab): string {
  * than borrowing a mark that would imply a client.
  */
 function tabMark(tab: IntegrationTab): string | null {
-  if (tab === "overview" || tab === "keys" || tab === "scenarios") return null;
+  if (tab === "overview" || tab === "keys" || tab === "scenarios" || tab === "inventory") return null;
   return INTEGRATION_MARKS[tab] ?? null;
 }
 
@@ -186,6 +187,7 @@ export default function Integrations({ apiBase, machineApiBase = apiBase, connec
             aria-labelledby={tabDomId(definition.id)}
             hidden={!active}
           >
+            {definition.id === "inventory" && <Suspense fallback={null}><AssetInventoryPage key={machineApiBase} apiBase={machineApiBase} active={active} /></Suspense>}
             {definition.id === "scenarios" && <Suspense fallback={null}><ScenariosPage key={machineApiBase} apiBase={machineApiBase} active={active} /></Suspense>}
             {definition.id === "overview" && (
               <IntegrationsOverview apiBase={apiBase} active={active} />

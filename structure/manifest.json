@@ -1104,6 +1104,18 @@
         "src/server/management/scenario-routes.ts",
         "src/config/atomic-write.ts"
       ]
+    },
+    {
+      "path": "asset-inventory.md",
+      "tier": 5,
+      "title": "MCP And Skills Inventory",
+      "scope": "Bounded read-only local discovery, source coverage and metadata-only presentation.",
+      "documents": [
+        "src/integrations/asset-inventory.ts",
+        "src/integrations/asset-inventory-types.ts",
+        "src/server/management/asset-inventory-routes.ts",
+        "gui/src/pages/integrations/AssetInventoryPage.tsx"
+      ]
     }
   ],
   "contracts": {

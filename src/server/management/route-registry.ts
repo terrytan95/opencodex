@@ -101,6 +101,7 @@ export const MANAGEMENT_ROUTES: readonly ManagementRoute[] = [
   { method: "DELETE", path: "/api/scenarios", module: "server/management/scenario-routes", mutates: true, exempt: { reason: "deferred-verb", why: "Dashboard scenario preview and explicit client-default application.", owner: "workspace scenarios", ownerDoc: "structure/workspace-scenarios.md" } },
   { method: "POST", path: "/api/scenarios/preview", module: "server/management/scenario-routes", mutates: false, exempt: { reason: "deferred-verb", why: "Dashboard scenario preview and explicit client-default application.", owner: "workspace scenarios", ownerDoc: "structure/workspace-scenarios.md" } },
   { method: "POST", path: "/api/scenarios/apply", module: "server/management/scenario-routes", mutates: true, exempt: { reason: "deferred-verb", why: "Dashboard scenario preview and explicit client-default application.", owner: "workspace scenarios", ownerDoc: "structure/workspace-scenarios.md" } },
+  { method: "GET", path: "/api/asset-inventory", module: "server/management/asset-inventory-routes", mutates: false, exempt: { reason: "deferred-verb", why: "Bounded read-only local MCP and Skills dashboard inventory.", owner: "asset inventory", ownerDoc: "structure/asset-inventory.md" } },
   // server/management-api
   { method: "POST", path: "/api/stop", module: "server/management-api", mutates: true },
   // codex/auth-api

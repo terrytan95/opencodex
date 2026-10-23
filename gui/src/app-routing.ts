@@ -124,6 +124,7 @@ export const DASHBOARD_UPDATE_HASH = "dashboard/update";
  */
 export const INTEGRATION_TAB_HASHES = [
   "integrations/scenarios",
+  "integrations/inventory",
   "integrations/keys",
   "integrations/codex",
   "integrations/claude",

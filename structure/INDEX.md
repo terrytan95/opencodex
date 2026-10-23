@@ -126,6 +126,7 @@ The dashboard, the management API, and third-party client config ownership.
 | [`codex-account-controls.md`](codex-account-controls.md) | Account selection order, custom usage thresholds, and stable account-card editing. |
 | [`context-inspector.md`](context-inspector.md) | Opt-in bounded request composition and in-memory context diagnostics. |
 | [`workspace-scenarios.md`](workspace-scenarios.md) | Credential-free model-default snapshots and preview-bound client configuration changes. |
+| [`asset-inventory.md`](asset-inventory.md) | Bounded read-only local discovery, source coverage and metadata-only presentation. |
 
 ### Tier 6 — Operations and process
 
@@ -173,6 +174,7 @@ A source area can be described by more than one doc, because these docs are orga
 | `gui/src/components/ModelPriceDialog.tsx` | [`pricing.md`](pricing.md) |
 | `gui/src/components/RoutingRulesEditor.tsx` | [`routing-rules.md`](routing-rules.md) |
 | `gui/src/hooks/useProviderAccountPools.ts` | [`account-auto-pause.md`](account-auto-pause.md) |
+| `gui/src/pages/integrations/AssetInventoryPage.tsx` | [`asset-inventory.md`](asset-inventory.md) |
 | `gui/src/pages/usage-context.tsx` | [`context-inspector.md`](context-inspector.md) |
 | `scripts/` | [`overview.md`](overview.md)<br>[`ops/docs-and-release.md`](ops/docs-and-release.md) |
 | `scripts/generate-ocx-skill-surface.ts` | [`cli-management.md`](cli-management.md) |
@@ -241,6 +243,8 @@ A source area can be described by more than one doc, because these docs are orga
 | `src/images/` | [`runtime.md`](runtime.md)<br>[`transports/inventory.md`](transports/inventory.md)<br>[`providers/anthropic-progress.md`](providers/anthropic-progress.md) |
 | `src/index.ts` | [`runtime.md`](runtime.md) |
 | `src/integrations/` | [`clients/integrations.md`](clients/integrations.md)<br>[`clients/qoder.md`](clients/qoder.md) |
+| `src/integrations/asset-inventory-types.ts` | [`asset-inventory.md`](asset-inventory.md) |
+| `src/integrations/asset-inventory.ts` | [`asset-inventory.md`](asset-inventory.md) |
 | `src/integrations/scenario-clients.ts` | [`workspace-scenarios.md`](workspace-scenarios.md) |
 | `src/integrations/scenarios.ts` | [`workspace-scenarios.md`](workspace-scenarios.md) |
 | `src/lab/` | [`runtime.md`](runtime.md)<br>[`adapters/compatibility-lab.md`](adapters/compatibility-lab.md) |
@@ -302,6 +306,7 @@ A source area can be described by more than one doc, because these docs are orga
 | `src/server/inference/advisor-diagnostics.ts` | [`advisor.md`](advisor.md) |
 | `src/server/management/` | [`providers/oauth-code-display-login.md`](providers/oauth-code-display-login.md) |
 | `src/server/management/anthropic-pool-settings.ts` | [`providers/anthropic-account-pool.md`](providers/anthropic-account-pool.md) |
+| `src/server/management/asset-inventory-routes.ts` | [`asset-inventory.md`](asset-inventory.md) |
 | `src/server/management/companion-routes.ts` | [`desktop-shell.md`](desktop-shell.md) |
 | `src/server/management/link-routes.ts` | [`remote-link.md`](remote-link.md) |
 | `src/server/management/logs-usage-routes.ts` | [`context-inspector.md`](context-inspector.md) |

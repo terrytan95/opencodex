@@ -1,0 +1,11 @@
+import {expect,test} from "bun:test";import {Window} from "happy-dom";import {act} from "react";
+import {clearClientResourceStoresForTests} from "../src/client-resource";import {LanguageProvider} from "../src/i18n/provider";import AssetInventoryPage from "../src/pages/integrations/AssetInventoryPage";
+test("inventory filters issues and sources without mutation requests",async()=>{
+ const keys=["document","window","navigator","localStorage","IS_REACT_ACT_ENVIRONMENT"] as const;const previous=new Map(keys.map(k=>[k,Object.getOwnPropertyDescriptor(globalThis,k)]));const original=globalThis.fetch;const browser=new Window({url:"http://localhost/"});
+ for(const k of keys)Object.defineProperty(globalThis,k,{configurable:true,value:k==="IS_REACT_ACT_ENVIRONMENT"?true:k==="window"?browser:Reflect.get(browser,k)});Object.defineProperty(browser.navigator,"language",{configurable:true,value:"en-US"});clearClientResourceStoresForTests();let calls=0;
+ globalThis.fetch=(async(_input,init)=>{expect(init?.method??"GET").toBe("GET");calls++;return Response.json({generatedAt:Date.now(),partial:false,sources:[],entries:[{kind:"mcp",name:"search",clients:["Codex"],sources:["~/config.toml"],status:"present",duplicate:false},{kind:"skill",name:"broken-skill",clients:["Codex"],sources:["~/skills/broken"],status:"broken",duplicate:false}]});}) as typeof fetch;
+ const{createRoot}=await import("react-dom/client");const host=browser.document.createElement("div");browser.document.body.append(host);const root=createRoot(host);
+ try{await act(async()=>root.render(<LanguageProvider><AssetInventoryPage apiBase="http://fixture" active/></LanguageProvider>));await act(async()=>{await new Promise(r=>setTimeout(r,20));});expect(host.querySelectorAll(".asset-row")).toHaveLength(2);
+ await act(async()=>host.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());expect(host.querySelectorAll(".asset-row")).toHaveLength(1);expect(host.textContent).toContain("broken-skill");expect(calls).toBe(1);
+ }finally{await act(async()=>root.unmount());clearClientResourceStoresForTests();globalThis.fetch=original;browser.close();for(const k of keys){const d=previous.get(k);if(d)Object.defineProperty(globalThis,k,d);else Reflect.deleteProperty(globalThis,k);}}
+});
