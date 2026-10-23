@@ -1,3 +1,4 @@
+import { contextSnapshot, setContextCapture } from "../../src/usage/context-inspector";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -580,6 +581,7 @@ test("non-streaming /v1/chat/completions returns chat.completion JSON", async ()
   const upstream = mockChatUpstream();
   saveConfig(mockConfig(`${upstream.url.toString().replace(/\/$/, "")}/v1`));
   const server = startServer(0);
+  setContextCapture(true);
   try {
     const response = await fetch(new URL("/v1/chat/completions", server.url), {
       method: "POST",
@@ -596,12 +598,15 @@ test("non-streaming /v1/chat/completions returns chat.completion JSON", async ()
       model: string;
       choices: Array<{ message: { role: string; content: string | null }; finish_reason: string }>;
     };
+    expect(contextSnapshot().sessions).toHaveLength(1);
+    expect(contextSnapshot().sessions[0]!.samples[0]!.parts.conversation).toBeGreaterThan(0);
     expect(json.object).toBe("chat.completion");
     expect(json.model).toBe("mock/test-model");
     expect(json.choices[0]?.message.role).toBe("assistant");
     expect(json.choices[0]?.message.content).toContain("Hello");
     expect(json.choices[0]?.finish_reason).toBe("stop");
   } finally {
+    setContextCapture(false);
     await server.stop(true);
     upstream.stop(true);
   }

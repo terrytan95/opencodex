@@ -1,3 +1,4 @@
+import { contextSnapshot, setContextCapture } from "../../src/usage/context-inspector";
 /**
  * Managed native Messages lane (PF-08) against fake upstreams. With
  * `protocols.rollout.managedMessagesNative` on, a direct route to a key-auth `anthropic`
@@ -190,6 +191,21 @@ async function settledRowFor(requestId: string) {
   }
   return rowFor(requestId);
 }
+
+test("native Messages contributes one context sample without changing the reply", async () => {
+  const config = fixtureConfig(startUpstream());
+  setContextCapture(true);
+  try {
+    const result = await send(config, { ...SOURCE_BODY, stream: false }, { "session-id": "context-native" });
+    expect(result.response.status).toBe(200);
+    const snapshot = contextSnapshot();
+    expect(snapshot.sessions).toHaveLength(1);
+    expect(snapshot.sessions[0]!.samples).toHaveLength(1);
+    expect(snapshot.sessions[0]!.samples[0]!.parts.instructions).toBeGreaterThan(0);
+    expect(snapshot.sessions[0]!.samples[0]!.reportedTokens).toBe(11);
+    expect(result.text).toContain("fixture reply");
+  } finally { setContextCapture(false); }
+});
 
 describe("managed native Messages", () => {
   for (const stream of [false, true]) {

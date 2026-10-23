@@ -1,3 +1,4 @@
+import { inspectContext } from "../usage/context-inspector";
 import { hasRoutingRules } from "../routing/rules";
 /**
  * OpenAI Chat Completions inbound (/v1/chat/completions) for GitHub Copilot App
@@ -173,6 +174,7 @@ async function handleChatCompletionsWithBudget(
     );
   }
 
+  logCtx.contextDraft ??= inspectContext(chatBody, req.headers, logCtx.apiKeyId);
   const requestedModel = chatBody.model as string;
   const { fastRow, effortRow } = parseSyntheticRowId(requestedModel, config);
   const droidDefaultEffort = effortRow

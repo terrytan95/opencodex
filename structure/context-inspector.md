@@ -13,3 +13,7 @@ eight largest numeric contributors, no prompt text, tool names, paths or raw ses
 Stopping/restarting fences in-flight drafts; capture has no body traversal while disabled.
 The pure browser DTO lives in `src/usage/context-inspector-types.ts`. Regression coverage:
 `tests/usage/usage-context-inspector.test.ts`.
+
+Native Chat and Messages ingress in `src/server/chat-completions.ts` and
+`src/server/claude-messages.ts` captures before a native passthrough can skip Responses preparation.
+Translated paths retain the original draft and do not count the body twice.

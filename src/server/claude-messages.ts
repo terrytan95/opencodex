@@ -1,3 +1,4 @@
+import { inspectContext } from "../usage/context-inspector";
 import { hasRoutingRules, routingHints } from "../routing/rules";
 /**
  * Anthropic Messages inbound (/v1/messages + /v1/messages/count_tokens) for Claude Code.
@@ -617,6 +618,7 @@ async function handleClaudeMessagesWithBudget(
   let messagesFeatures: () => Iterable<ProtocolFeature> = () => [];
   try {
     anthropicBody = await readAnthropicBody(req, translatorBudget, resolveInboundBodyLimitBytes(config.maxInboundBodyBytes));
+    logCtx.contextDraft ??= inspectContext(anthropicBody, req.headers, logCtx.apiKeyId);
     // Defensive [1m] strip (devlog 138): clients normally remove the context-variant
     // marker themselves; the 1M signal we act on is the anthropic-beta header.
     // Case-insensitive — the CLI matches /\[1m\]/i (audit 021 #7).

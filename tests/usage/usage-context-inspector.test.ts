@@ -109,3 +109,12 @@ test("a concrete retry does not capture another logical request", () => {
   observeCacheDiagnosticInbound(child, body, headers, "caller", false);
   expect(child.contextDraft).toBeUndefined();
 });
+
+
+test("native Chat and Messages bodies retain the same bounded composition", () => {
+  setContextCapture(true);
+  const chat = inspectContext({ messages: [{ role: "system", content: "fixture instructions" }, { role: "user", content: "fixture request" }, { role: "tool", content: "fixture result" }], tools: [{ type: "function", function: { name: "mcp__fixture__read", description: "fixture tool" } }] }, headers)!;
+  expect(chat.parts.instructions).toBeGreaterThan(0); expect(chat.parts.mcp).toBeGreaterThan(0); expect(chat.parts.results).toBeGreaterThan(0);
+  const messages = inspectContext({ system: [{ type: "text", text: "fixture instructions" }], messages: [{ role: "user", content: [{ type: "tool_result", content: "fixture result" }] }] }, headers)!;
+  expect(messages.parts.instructions).toBeGreaterThan(0); expect(messages.parts.results).toBeGreaterThan(0);
+});
