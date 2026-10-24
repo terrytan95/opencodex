@@ -626,7 +626,7 @@ export interface OcxConfig {
    * who wants Reserve has to turn the setting off rather than delete the key.
    */
   codexMainAccountHardLock?: boolean;
-  /** Per-window percentages: short defaults to 90, long to 98; integers 80..100, short <= long. */
+  /** Per-window percentages: short defaults to 80, long to 90; integers 80..100, short <= long. */
   codexMainAccountHardLockThresholds?: { short?: number; long?: number };
   /**
    * Extended hard-lock settings: while the lock blocks and no Codex account can serve a

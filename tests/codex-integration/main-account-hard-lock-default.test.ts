@@ -76,8 +76,8 @@ afterEach(() => {
 });
 
 describe("main-account hard lock default (#5694)", () => {
-  test("the threshold is 98 percent", () => {
-    expect(MAIN_ACCOUNT_HARD_LOCK_PERCENT).toBe(98);
+  test("the threshold is 90 percent", () => {
+    expect(MAIN_ACCOUNT_HARD_LOCK_PERCENT).toBe(90);
   });
 
   test("an absent key or true enables the policy; only false opts out", () => {
@@ -102,10 +102,10 @@ describe("main-account hard lock default (#5694)", () => {
     )).toBe(false);
   });
 
-  test("97.9 percent is ready and 98 percent is blocked without any key present", () => {
-    observe({ weeklyPercent: 97.9 });
+  test("89.9 percent is ready and 90 percent is blocked without any key present", () => {
+    observe({ weeklyPercent: 89.9 });
     expect(getMainAccountHardLockStatus({}).state).toBe("ready");
-    observe({ shortPercent: 98 });
+    observe({ weeklyPercent: 90 });
     expect(getMainAccountHardLockStatus({})).toMatchObject({ enabled: true, state: "blocked" });
     expect(isMainAccountHardLocked({})).toBe(true);
     // The opt-out keeps the same observation admissible.

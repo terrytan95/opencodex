@@ -1,7 +1,7 @@
 /** Quota wire/storage shapes. This leaf must not import credential or config owners. */
 /** Long-window default; explicit main-account hard-lock thresholds may override it. */
-export const MAIN_ACCOUNT_HARD_LOCK_PERCENT = 98;
-export const MAIN_ACCOUNT_HARD_LOCK_SHORT_PERCENT = 90;
+export const MAIN_ACCOUNT_HARD_LOCK_PERCENT = 90;
+export const MAIN_ACCOUNT_HARD_LOCK_SHORT_PERCENT = 80;
 export const MAIN_ACCOUNT_HARD_LOCK_MIN_PERCENT = 80;
 
 /**

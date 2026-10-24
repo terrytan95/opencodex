@@ -35,7 +35,7 @@ export interface MainAccountHardLockStatus {
 }
 
 /** The server defaults, used whenever the management payload does not carry a usable pair. */
-export const DEFAULT_MAIN_HARD_LOCK_THRESHOLDS = { short: 90, long: 98 } as const;
+export const DEFAULT_MAIN_HARD_LOCK_THRESHOLDS = { short: 80, long: 90 } as const;
 
 /**
  * The thresholds as UI copy may show them. The management API is trusted for shape but not

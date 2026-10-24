@@ -228,7 +228,7 @@ describe("applyMainHardLockFallbackOverride", async () => {
     const cfg = config({ codexMainAccountHardLockFallback: FALLBACK } as Partial<OcxConfig>);
     observe({ weeklyPercent: 99 });
     expect(await applyMainHardLockFallbackOverride({ model: "gpt-5.3" }, cfg)).not.toBeNull();
-    observe({ weeklyPercent: 97.99 });
+    observe({ weeklyPercent: 89.99 });
     expect(await applyMainHardLockFallbackOverride({ model: "gpt-5.3" }, cfg)).toBeNull();
   });
 

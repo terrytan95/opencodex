@@ -55,7 +55,7 @@ checks it where the main-account hard lock is checked: `assertMainAccountPolicy`
 `requestOwnedMainPinState` stops preserving a caller's own main credential. Both read the main
 policy quota the lock reads and no plan, because several of those callers may not open the physical
 auth file. The two main-account policies stay separate: listing `__main__` does not lift the hard lock
-(98% by default), which refuses first, and the main card's switch says so. Both refusals are
+(5h 80% and long-window 90% by default), which refuses first, and the main card's switch says so. Both refusals are
 policy, not authentication: they keep their own message in `cooldownErrorMessage` and never mark the
 login for reauthentication, including when the window fills during the awaited token refresh.
 

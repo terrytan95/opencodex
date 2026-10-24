@@ -246,7 +246,7 @@ describe("quota auto-refresh native-main admission", () => {
     try {
       await runCodexQuotaAutoRefresh(cfg, now, { persistCompleted: recordMarkers });
       expect(getMainAccountHardLockStatus(cfg)).toEqual({ enabled: true, state: "blocked",
-        thresholds: { short: 90, long: 98 }, window: "short" });
+        thresholds: { short: 80, long: 90 }, window: "short" });
       expect(token).not.toHaveBeenCalled();
       expect(calls).toEqual([]);
       expect(cfg.codexQuotaAutoRefresh?.[MAIN]).toEqual({ fiveHour: true, weekly: true });

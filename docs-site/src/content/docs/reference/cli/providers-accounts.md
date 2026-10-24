@@ -442,12 +442,12 @@ account usable ([#5694](https://github.com/lidge-jun/opencodex/issues/5694)). Th
 Reserve: while the block is in force, Reserve on that main account cannot activate. To let the main
 account run to exhaustion and hand over to Reserve, turn the switch off.
 
-The **5h window and the weekly window each block on their own**: the 5h window reaching 90% or the weekly window reaching 98% blocks
+The **5h window and the weekly window each block on their own**: the 5h window reaching 80% or the weekly window reaching 90% blocks
 immediately, even while the other still has headroom. Monthly-only accounts use their monthly
 window. The block releases automatically, with the switch still on, once every blocking window
 reports a fresh reading below its threshold (a 0% reset counts); the next observation at the threshold blocks again.
 Configure `codexMainAccountHardLockThresholds` in `config.json` with optional `short` and `long`
-percentages, for example `{ "short": 90, "long": 98 }`. Both must be integers from 80 through 100,
+percentages, for example `{ "short": 80, "long": 90 }`. Both must be integers from 80 through 100,
 and `short` must not exceed `long`; omitted fields use the defaults. The settings API accepts the
 same object and returns the effective values in `mainAccountHardLock.thresholds`.
 
@@ -489,7 +489,7 @@ its primary window explicitly lasts **at least 24 hours** and reports valid usag
 explicitly `null` and a measured secondary supplies the weekly usage. In either case, secondary/tertiary
 windows must be explicitly `null` or explicitly last at least 24 hours and report valid usage. This follows the parser's short/long boundary, so a
 one-day window qualifies as well as weekly/monthly windows. The current window still uses the same
-configured long-window threshold (98% by default). This relies on the single reported snapshot; repeated observations are not required.
+configured long-window threshold (90% by default). This relies on the single reported snapshot; repeated observations are not required.
 Any omitted window field, an unknown duration, or partial response headers cannot clear a previous block.
 All-null responses carrying only credits and supplementary monthly-only readings also cannot establish recovery.
 The proxy checks the stored credential again before applying a delayed response. An unreadable file

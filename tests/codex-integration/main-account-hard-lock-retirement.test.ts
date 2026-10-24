@@ -69,11 +69,11 @@ describe("authoritative main 5h window retirement (#6244)", () => {
         }
         expect(quota).not.toHaveProperty("shortWindowAbsent");
       }
-      expect(getMainAccountHardLockStatus({}).state).toBe(percent < 98 ? "ready" : "blocked");
+      expect(getMainAccountHardLockStatus({}).state).toBe(percent < 90 ? "ready" : "blocked");
     });
   }
 
-  test.each([0, 35, 97.99, 98, 100])("explicit absent primary retires old 5h while weekly %s still governs", percent => {
+  test.each([0, 35, 89.99, 90, 100])("explicit absent primary retires old 5h while weekly %s still governs", percent => {
     publish({ rate_limit: {
       primary_window: null, secondary_window: { ...weekly, used_percent: percent }, tertiary_window: null,
     } });
@@ -83,7 +83,7 @@ describe("authoritative main 5h window retirement (#6244)", () => {
       expect(policy?.[field]).toBeUndefined();
     }
     expect(policy).not.toHaveProperty("shortWindowAbsent");
-    expect(getMainAccountHardLockStatus({}).state).toBe(percent < 98 ? "ready" : "blocked");
+    expect(getMainAccountHardLockStatus({}).state).toBe(percent < 90 ? "ready" : "blocked");
   });
 
   test.each<WhamUsageResponse>([

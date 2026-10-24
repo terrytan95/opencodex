@@ -38,7 +38,7 @@ identical at this layer and are checked differently.
 
 A locked main credential closes request admission; it does not reserve the
 account's remaining quota, and a predicted reset never releases the block on
-its own. The thresholds (by default `short` 90, `long` 98) are visible in the
+its own. The thresholds (by default `short` 80, `long` 90) are visible in the
 status payload and configurable through `codexMainAccountHardLockThresholds`.
 
 A hard-lock refusal is reported as `usage_limit_reached`, so Codex ends the turn

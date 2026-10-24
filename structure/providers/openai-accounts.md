@@ -552,7 +552,7 @@ permission is removed. Selected-main and caller-owned Direct materialization use
 the live preference when persistence fails; GET never saves. Coverage is in
 `tests/codex-integration/codex-use-remaining-quota.test.ts` and the existing main-auth suite.
 
-The main-account admission policy defaults to 90% for short windows and 98% for long windows;
+The main-account admission policy defaults to 80% for short windows and 90% for long windows;
 `codexMainAccountHardLockThresholds` permits ordered integer thresholds from 80 through 100.
 Policy evidence retention uses the minimum configurable 80%, so a partial update or elapsed reset
 cannot erase a reading that may block under an allowed configuration. Fresh lower usage and

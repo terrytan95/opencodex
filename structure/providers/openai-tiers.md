@@ -367,7 +367,7 @@ Regression coverage lives in `tests/codex-integration/codex-quota-parser-parity.
 `tests/usage/quota-reset-observation.test.ts`, and `tests/usage/quota-reset-seen-store.test.ts`.
 
 `codexMainAccountHardLock` is a local admission policy that is **on by default** since #5694, at
-short 90% and long `MAIN_ACCOUNT_HARD_LOCK_PERCENT` = 98%, overridden by ordered integer
+short 80% and long `MAIN_ACCOUNT_HARD_LOCK_PERCENT` = 90%, overridden by ordered integer
 `codexMainAccountHardLockThresholds` in 80..100. The 5h/short and weekly windows each govern on
 their own: either one reaching its effective threshold blocks, and an unknown or invalid reading in one never hides a block
 in the other (unknown still admits). Monthly governs only a monthly-only account. A block holds
@@ -425,7 +425,7 @@ qualifies, not only a seven-day or monthly window. The policy trusts that one re
 it does not require repeated observations or independently confirm upstream window completeness.
 An omitted primary/secondary, omitted tertiary without that verdict, unreadable long window, unknown duration, partial headers, or invalid usage
 cannot prove that the short window disappeared. All-null credits-only and tertiary-only Go/Free responses remain insufficient. Replacement proof belongs only to that observation and is never persisted;
-the resulting weekly/monthly window still blocks at its long threshold (98% by default). This prevents old short-window exhaustion
+the resulting weekly/monthly window still blocks at its long threshold (90% by default). This prevents old short-window exhaustion
 from surviving indefinitely on a now weekly/monthly account. A live main writer applies that same
 retirement proof to the display/rotation cache, so account selection cannot keep refusing the
 recovered main account on its old short tuple. Coverage lives in
