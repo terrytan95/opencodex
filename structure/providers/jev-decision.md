@@ -198,12 +198,6 @@ or an opencodex model route, with the timeout and a Test probe; there is no sepa
 
 ## Session pin
 
-The add and detail Combo editors use `gui/src/components/combo-session-pin.tsx` for an
-opt-in switch and idle minutes input. Parsing, dirty-state comparison and PUT serialization
-in `gui/src/combo-workspace-data.ts` round-trip the exact millisecond duration; a JEV save
-sends an explicit object or null, while other strategies omit the field. Invalid durations
-block saving. The shared server validator remains authoritative.
-
 `sessionPin: { ttlMs }` is an opt-in, JEV-only Combo field (#7525); `src/combos/jev-session-pin-config.ts`
 owns its 60000..86400000 ms range, the CLI duration grammar and the closed `pinReason` vocabulary.
 The shared JEV Decision method editor exposes a pin checkbox and an exact millisecond idle window.
