@@ -206,6 +206,7 @@ Kiro 로그인에는 Kiro CLI가 필요합니다. Unix에서는 `curl -fsSL http
 - **명시적 가져오기 전용:** OpenCodeX는 DeepSeek Harness의 설치 및 로그인 여부(`~/.dsh/.credentials.yaml`)를 감지하지만, 사용자의 명시적 명령(`ocx login dsh-account` 또는 웹 대시보드에서 가져오기 클릭) 없이 토큰을 자동 복사, 가져오기 또는 사용하지 않습니다.
 - **DSH 자격 증명 저장소 읽기 전용:** OpenCodeX는 `~/.dsh/.credentials.yaml`을 엄격히 읽기 전용으로 취급합니다. OpenCodeX는 DeepSeek Harness에 속한 어떠한 파일도 쓰기, 수정, 삭제하거나 권한을 변경하지 않습니다.
 - **격리된 자격 증명 복사본 및 로그아웃:** 가져오기 시 OpenCodeX는 DeepSeek의 신뢰할 수 있는 ID 엔드포인트(`/auth-api/v0/users/current`)에서 토큰을 검증하고 자체 복사본을 OpenCodeX 인증 저장소에 저장합니다. OpenCodeX에서 로그아웃하거나 계정을 삭제해도 OpenCodeX 로컬 복사본만 삭제되며, 업스트림 원격 세션 로그아웃을 트리거하거나 DeepSeek Harness Desktop에서 로그아웃되지 않습니다.
+- **ID 엔드포인트 차단:** HTTP 403 또는 WAF 확인 응답이 오면 OpenCodex는 `/api/v0/users/get_user_summary`로 자격 증명을 검증합니다. 저장된 ID는 검증된 사용자 ID가 아닌 자격 증명 지문입니다. 같은 자격 증명은 같은 슬롯을 사용합니다. 자격 증명이 바뀌거나 프로필 접근이 복구되면 기존 슬롯을 재인증하지 말고 계정을 추가하세요. 같은 사용자의 계정 행이 두 개 생길 수 있습니다.
 - **백그라운드 토큰 자동 갱신 없음 및 401 재가져오기:** DSH 세션 부여에는 자동 백그라운드 갱신 엔드포인트가 없습니다. 업스트림에서 HTTP 401(`ACCOUNT_TOKEN_INVALID`)을 반환하면 OpenCodeX는 계정을 `needsReauth`로 표시하고 라우팅을 중단합니다. 액세스를 복원하려면 사용자가 `ocx login dsh-account`로 명시적 재가져오기를 수행해야 합니다.
 - **서드파티 면책 조항:** OpenCodeX는 서드파티 클라이언트의 세션 부여 재사용에 대한 DeepSeek의 공식 보증이나 승인을 주장하지 않습니다.
 

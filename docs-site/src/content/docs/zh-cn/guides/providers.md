@@ -213,6 +213,7 @@ API Key 提供商，也不负责让 WorkBuddy 桌面客户端使用 OpenCodex �
 - **仅显式导入**：OpenCodeX 会检测是否已安装 DeepSeek Harness 且已登录（`~/.dsh/.credentials.yaml`），但绝不会在没有用户明确操作（`ocx login dsh-account` 或在 Web 仪表盘点击导入）的情况下自动复制、导入或使用该令牌。
 - **对 DSH 凭据库只读**：OpenCodeX 将 `~/.dsh/.credentials.yaml` 视为严格只读。OpenCodeX 绝不写入、修改、删除或更改任何属于 DeepSeek Harness 的文件权限。
 - **隔离的凭据副本与登出**：导入后，OpenCodeX 会通过 DeepSeek 权威身份端点（`/auth-api/v0/users/current`）校验令牌，并在 OpenCodeX 认证库中保存独立副本。在 OpenCodeX 中登出或删除该账户仅会删除 OpenCodeX 本地副本，绝不会触发上游远程会话登出，也不会退出 DeepSeek Harness Desktop。
+- **身份接口被拦截：** 身份接口返回 HTTP 403 或 WAF 验证时，OpenCodex 改用 `/api/v0/users/get_user_summary` 校验凭据。导入的账户使用凭据指纹，不代表已验证的用户 ID。同一凭据会复用原位置。凭据更换或身份接口恢复后，请使用**添加账户**，不要重新认证旧位置；同一个人可能因此有两条账户记录。
 - **无后台令牌自动刷新与 401 重新导入**：DSH 会话授权不支持自动后台刷新端点。若上游返回 HTTP 401（`ACCOUNT_TOKEN_INVALID`），OpenCodeX 将该账户标记为 `needsReauth` 并停止路由。要恢复访问，用户必须通过 `ocx login dsh-account` 显式重新导入。
 - **第三方免责声明**：OpenCodeX 不主张 DeepSeek 官方对于第三方客户端复用会话授权提供背书或支持。
 

@@ -131,6 +131,67 @@ describe("DSH Account Validation", () => {
     }
   });
 
+  test("imports WAF-blocked grants only after summary validation and keeps token slots separate", async () => {
+    const previousHome = process.env.OPENCODEX_HOME;
+    process.env.OPENCODEX_HOME = join(tmp, "grant-slots");
+    const dir = join(tmp, "blocked-profile");
+    mkdirSync(dir, { recursive: true });
+    process.env.DSH_HOME = dir;
+    try {
+      const { saveCredential, getAccountSet } = await import("../../src/oauth/store");
+      for (const [index, token] of ["grant-a", "grant-b", "grant-a"].entries()) {
+        const content = `records:\n  deepseek-account-platform/default:\n    kind: grant\n    payload:\n      token: ${token}\n`;
+        const path = join(dir, ".credentials.yaml");
+        writeFileSync(path, content);
+        const before = statSync(path);
+        const calls: string[] = [];
+        globalThis.fetch = async (input, init) => {
+          calls.push(String(input));
+          expect(init?.redirect).toBe("manual");
+          expect(new Headers(init?.headers).get("x-dsh-auth-token")).toBe(token);
+          return calls.length === 1
+            ? new Response(null, { status: index === 1 ? 202 : 403, headers: { "x-amzn-waf-action": "challenge" } })
+            : Response.json({ code: 0, data: { biz_code: 0, biz_data: { normal_wallets: [], bonus_wallets: [], total_costs: [] } } });
+        };
+        const credential = await loginDshAccount({ signal: new AbortController().signal });
+        expect(calls).toEqual([
+          "https://platform.deepseek.com/auth-api/v0/users/current",
+          "https://platform.deepseek.com/api/v0/users/get_user_summary",
+        ]);
+        expect(credential.accountId).toMatch(/^dsh-grant:[a-f0-9]{64}$/);
+        expect(credential.accountId).not.toContain(token);
+        expect(credential.email).toBeUndefined();
+        await saveCredential("dsh-account", credential);
+        expect(readFileSync(path, "utf8")).toBe(content);
+        expect(statSync(path).mtimeMs).toBe(before.mtimeMs);
+      }
+      expect(getAccountSet("dsh-account")!.accounts.map(a => a.credential.access)).toEqual(["grant-a", "grant-b"]);
+    } finally {
+      if (previousHome === undefined) delete process.env.OPENCODEX_HOME;
+      else process.env.OPENCODEX_HOME = previousHome;
+    }
+  });
+
+  test("summary fallback rejects errors, redirects, missing wallets and oversized bodies", async () => {
+    const failures = [
+      () => new Response(null, { status: 401 }),
+      () => new Response(null, { status: 403 }),
+      () => new Response(null, { status: 302, headers: { location: "https://evil.example" } }),
+      () => Response.json({ code: 0, data: { biz_code: 1, biz_data: { normal_wallets: [] } } }),
+      () => Response.json({ code: 0, data: { biz_code: 0, biz_data: {} } }),
+      () => new Response("secret-invalid-json"),
+      () => new Response("x".repeat(DSH_PROFILE_MAX_BYTES + 1)),
+    ];
+    for (const failure of failures) {
+      let calls = 0;
+      globalThis.fetch = async () => ++calls === 1 ? new Response(null, { status: 403 }) : failure();
+      const result = await validateDshAccountToken("grant-a");
+      expect(calls).toBe(2);
+      expect(result.valid).toBe(false);
+      expect(result.error).not.toContain("secret");
+    }
+  });
+
   test("keeps distinct upstream identities separate even when email and display names coincide", async () => {
     const previousHome = process.env.OPENCODEX_HOME;
     process.env.OPENCODEX_HOME = join(tmp, "identity-slots");

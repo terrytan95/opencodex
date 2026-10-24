@@ -13,6 +13,7 @@ import { readBoundedResponseBody } from "../lib/bounded-body";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 export const DSH_PLATFORM_ORIGIN = "https://platform.deepseek.com";
 export const DSH_INFERENCE_ORIGIN = "https://api.deepseek.com/anthropic";
@@ -97,7 +98,7 @@ export async function validateDshAccountToken(
   try {
     const timeoutSignal = AbortSignal.timeout(DSH_PROFILE_FETCH_TIMEOUT_MS);
     const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-    const response = await fetch(`${DSH_PLATFORM_ORIGIN}/auth-api/v0/users/current`, {
+    let response = await fetch(`${DSH_PLATFORM_ORIGIN}/auth-api/v0/users/current`, {
       method: "GET",
       headers: {
         "x-dsh-auth-token": token,
@@ -106,6 +107,18 @@ export async function validateDshAccountToken(
       redirect: "manual",
       signal: combinedSignal,
     });
+
+    const summaryFallback = response.status === 403
+      || (response.status === 202 && response.headers.get("x-amzn-waf-action") === "challenge");
+    if (summaryFallback) {
+      void response.body?.cancel().catch(() => undefined);
+      response = await fetch(`${DSH_PLATFORM_ORIGIN}/api/v0/users/get_user_summary`, {
+        method: "GET",
+        headers: { "x-dsh-auth-token": token, "accept": "application/json" },
+        redirect: "manual",
+        signal: combinedSignal,
+      });
+    }
 
     if (response.status === 401) {
       return { valid: false, error: "ACCOUNT_TOKEN_INVALID" };
@@ -150,6 +163,9 @@ export async function validateDshAccountToken(
           id?: string | null;
           email?: string;
           id_profile?: { name?: string | null; picture?: string | null };
+          normal_wallets?: unknown;
+          bonus_wallets?: unknown;
+          total_costs?: unknown;
         };
       };
     };
@@ -159,6 +175,13 @@ export async function validateDshAccountToken(
     }
 
     const biz = body.data.biz_data;
+    if (summaryFallback) {
+      if (![biz.normal_wallets, biz.bonus_wallets, biz.total_costs].every(Array.isArray)) {
+        return { valid: false, error: "PROFILE_VALIDATION_FAILED" };
+      }
+      // A validated grant is not a verified user ID: changed grants must never replace its slot.
+      return { valid: true, accountId: `dsh-grant:${createHash("sha256").update(token).digest("hex")}` };
+    }
     // Account-store slot matching and reauthentication require the same stable upstream ID.
     // Email/phone/display names and a shared fallback must never identify an imported account.
     const accountId = typeof biz.id === "string" ? biz.id.trim() : "";

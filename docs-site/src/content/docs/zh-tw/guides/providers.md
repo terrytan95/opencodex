@@ -258,6 +258,7 @@ database 並移除目前的 WAL、SHM 與 journal sidecar，再發布先前的 s
 - **僅明確匯入**：OpenCodeX 會偵測是否已安裝 DeepSeek Harness 且已登入（`~/.dsh/.credentials.yaml`），但絕不會在未經使用者明確操作（`ocx login dsh-account` 或在 Web 儀表板點選匯入）的情況下自動複製、匯入或使用該權杖。
 - **對 DSH 憑據存放區唯讀**：OpenCodeX 將 `~/.dsh/.credentials.yaml` 視為嚴格唯讀。OpenCodeX 絕不寫入、修改、刪除或變更任何屬於 DeepSeek Harness 的檔案權限。
 - **隔離的憑據複本與登出**：匯入後，OpenCodeX 會透過 DeepSeek 權威身分端點（`/auth-api/v0/users/current`）驗證權杖，並在 OpenCodeX 認證存放區中保存獨立複本。在 OpenCodeX 中登出或移除該帳號僅會刪除 OpenCodeX 本地複本，絕不觸發上游遠端工作階段登出，也不會使 DeepSeek Harness Desktop 登出。
+- **身分端點遭攔截：** 身分端點傳回 HTTP 403 或 WAF 驗證時，OpenCodex 改用 `/api/v0/users/get_user_summary` 驗證憑據。匯入的帳號使用憑據指紋，不代表已驗證的使用者 ID。同一憑據會重用原位置。憑據更換或身分端點恢復後，請使用**新增帳號**，不要重新驗證舊位置；同一個人可能因此有兩筆帳號記錄。
 - **無背景權杖自動輪替與 401 重新匯入**：DSH 工作階段授權不提供自動背景重新整理端點。若上游傳回 HTTP 401（`ACCOUNT_TOKEN_INVALID`），OpenCodeX 會將該帳號標記為 `needsReauth` 並停止路由。若要恢復存取，使用者必須透過 `ocx login dsh-account` 明確重新匯入。
 - **第三方免責聲明**：OpenCodeX 不主張 DeepSeek 官方對第三方客戶端複用工作階段授權提供背書或支援。
 
