@@ -3,9 +3,9 @@
  * No network — transforms GET /api/combos rows into rail groups + attention.
  */
 
-import { normalizeJevSessionPin, type JevSessionPinConfig } from "../../src/combos/jev-session-pin-config";
 import { SUPPORTED_NATIVE_OPENAI_SLUGS } from "../../src/codex/catalog/native-models";
 import { PROVIDER_QUOTA_MAX_AGE_MS } from "../../src/providers/quota-types";
+import { normalizeJevSessionPin, type JevSessionPinConfig } from "../../src/combos/jev-session-pin-config";
 import type { TKey } from "./i18n/shared";
 import {
   CANONICAL_JEV_DECISION_PROVIDER,
@@ -172,6 +172,7 @@ export interface ComboItem {
   decisionModel?: string | null;
   /** `jev` only: decision deadline in ms; null/omitted = the server default. */
   decisionTimeoutMs?: number | null;
+  /** `jev` only: undefined preserves an omitted setting; null explicitly turns the pin off. */
   sessionPin?: JevSessionPinConfig | null;
   targets: ComboTarget[];
 }
@@ -302,7 +303,7 @@ export function parseComboList(payload: unknown): ComboItem[] {
     const decisionProvider = normalizeDecisionProvider(r.decisionProvider);
     const decisionModel = normalizeAlias(r.decisionModel);
     const decisionTimeoutMs = normalizeDecisionTimeoutMs(r.decisionTimeoutMs);
-    const sessionPin = normalizeJevSessionPin(r.sessionPin);
+    const sessionPin = r.sessionPin === null ? null : normalizeJevSessionPin(r.sessionPin);
     out.push({
       id,
       model: typeof r.model === "string" && r.model.trim()
@@ -320,7 +321,7 @@ export function parseComboList(payload: unknown): ComboItem[] {
       ...(decisionProvider !== null ? { decisionProvider } : {}),
       ...(decisionModel !== null ? { decisionModel } : {}),
       ...(decisionTimeoutMs !== null ? { decisionTimeoutMs } : {}),
-      ...(sessionPin ? { sessionPin } : {}),
+      ...(sessionPin !== undefined ? { sessionPin } : {}),
       targets,
     });
   }
@@ -495,6 +496,7 @@ export function draftEquals(a: ComboItem, b: ComboItem): boolean {
       (a.decisionProvider ?? null) !== (b.decisionProvider ?? null)
       || (a.decisionModel ?? null) !== (b.decisionModel ?? null)
       || (a.decisionTimeoutMs ?? null) !== (b.decisionTimeoutMs ?? null)
+      || (a.sessionPin === undefined) !== (b.sessionPin === undefined)
       || (a.sessionPin?.ttlMs ?? null) !== (b.sessionPin?.ttlMs ?? null)
     ))
   ) return false;
@@ -569,7 +571,7 @@ export function toPutBody(
             decisionProvider: item.decisionModel?.trim() ? null : normalizeDecisionProvider(item.decisionProvider),
             decisionModel: item.decisionModel?.trim() || null,
             decisionTimeoutMs: item.decisionTimeoutMs ?? null,
-            sessionPin: item.sessionPin ?? null,
+            ...(item.sessionPin !== undefined ? { sessionPin: item.sessionPin } : {}),
           }
         : {}),
     },
