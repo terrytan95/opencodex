@@ -129,7 +129,6 @@ describe("combo-workspace-data", () => {
         decisionProvider: null,
         decisionModel: null,
         decisionTimeoutMs: null,
-        sessionPin: null,
       },
     });
   });
