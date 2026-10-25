@@ -537,9 +537,8 @@ function fileRow(status: IntegrationStatus): OverviewRow {
 }
 
 /**
- * Catalog order: the two surfaces every user has, then the three native
- * clients, then the file clients in their existing order. It matches the tab
- * strip above the grid, so the eye moves the same way in both.
+ * Enabled clients come first, using the same state as the card switch.
+ * Preserve catalog order within each group.
  */
 export function buildOverviewRows(sources: OverviewSources): OverviewRows {
   const nativeCodex = sources.native?.find(status => status.clientId === "codex");
@@ -585,6 +584,7 @@ export function buildOverviewRows(sources: OverviewSources): OverviewRows {
       });
     }
   }
+  rows.sort((a, b) => Number(b.toggleOn ?? b.applied) - Number(a.toggleOn ?? a.applied));
   return { keysRow: keysRow(sources.keyPhase, sources.keyCount), rows };
 }
 

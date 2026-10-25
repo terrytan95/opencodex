@@ -3,6 +3,9 @@ title: Integrations
 description: Connect opencodex to OpenCode, Pi, Gentle Shell, OMP, Hermes, OpenClaw, Kimi Code, gjc, DeepSeek Harness, MiniMax Code, ZCode, Prime Agent, Aside, Raycast, omo, Cline CLI, Kilo, Command Code and Factory Droid from the dashboard — one switch per client, with a backup taken before every write.
 ---
 
+The **Connect → Overview** client list shows enabled clients first. Clients in
+each group keep their existing order. The order updates when client status changes.
+
 The **Connect** page writes opencodex's provider block into a client's own config
 file, and removes it again. Twenty clients work this way, each with a switch:
 

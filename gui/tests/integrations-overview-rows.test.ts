@@ -73,6 +73,30 @@ test("a null source is unknown, never absent, and is counted in neither total", 
   expect(counts.unknown).toBe(5);
 });
 
+test("enabled clients come first, preserving catalog order in both groups", () => {
+  const input = sources({
+    codex: { routingInjected: true },
+    native: [codexNative()],
+    clients: [
+      fileStatus({ clientId: "hermes", state: "current" }),
+      fileStatus({ clientId: "pi", state: "stale" }),
+      fileStatus({ clientId: "opencode", state: "absent" }),
+    ],
+  });
+  expect(buildOverviewRows(input).rows.map(row => row.id)).toEqual([
+    "codex", "pi", "hermes", "claude", "claudeDesktop", "grok", "cursor", "opencode",
+  ]);
+
+  // A disabled native client can still have an applied block awaiting cleanup.
+  input.native = [codexNative({ desiredEnabled: false })];
+  const disabled = buildOverviewRows(input);
+  expect(rowById(disabled, "codex")).toMatchObject({ applied: true, toggleOn: false });
+  expect(disabled.rows.map(row => row.id)).toEqual([
+    "pi", "hermes", "codex", "claude", "claudeDesktop", "grok", "cursor", "opencode",
+  ]);
+  expect(input.clients.map(client => client.clientId)).toEqual(["hermes", "pi", "opencode"]);
+});
+
 test("Codex reads routingInjected, not status", () => {
   // `protected` is about surviving a reboot. With no injected routing the
   // proxy is not in Codex's path, and the card must say so.
