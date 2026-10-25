@@ -6,8 +6,9 @@
  * (ADR-1/ADR-8 in devlog/_fin/260804_router_intelligence/000_master_plan.md).
  */
 
-// Version 3 indexes attempt targets so routing never searches serialized history.
-export const HISTORY_SCHEMA_VERSION = 3;
+// Version 2 rebuilds the derived projection so old raw requested-model selectors
+// are replaced by the bounded encoding already used by canonical JSONL reads.
+export const HISTORY_SCHEMA_VERSION = 2;
 export const HISTORY_DB_FILENAME = "routing-history.sqlite";
 
 export const HISTORY_META_KEYS = {
@@ -66,15 +67,6 @@ CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
 CREATE INDEX IF NOT EXISTS idx_requests_conversation ON requests(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_requests_api_key ON requests(api_key_id);
 CREATE INDEX IF NOT EXISTS idx_requests_profile ON requests(profile_id);
-CREATE INDEX IF NOT EXISTS idx_requests_target_ts ON requests(provider, model, timestamp DESC);
-
-CREATE TABLE IF NOT EXISTS request_attempt_targets (
-  provider TEXT NOT NULL,
-  model TEXT NOT NULL,
-  timestamp INTEGER NOT NULL,
-  request_id TEXT NOT NULL,
-  PRIMARY KEY (provider, model, timestamp DESC, request_id)
-) WITHOUT ROWID;
 `;
 
 export function historyIndexPath(configDir: string): string {

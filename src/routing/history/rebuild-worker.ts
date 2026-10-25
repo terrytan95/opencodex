@@ -8,16 +8,14 @@
  * closes it. The serving thread then swaps the finished file in.
  */
 
-import { appendIndexFile, buildIndexFile, removeAbandonedBuilds } from "./build-file";
+import { buildIndexFile, removeAbandonedBuilds } from "./build-file";
 import type { RebuildWorkerReply, RebuildWorkerRequest } from "./rebuild-protocol";
 
 declare const self: Worker;
 
 function handle(request: RebuildWorkerRequest): RebuildWorkerReply {
   removeAbandonedBuilds(request.indexPath);
-  const rows = request.fromOffset === undefined
-    ? buildIndexFile(request.buildPath, request.reason, request.revision)
-    : appendIndexFile(request.indexPath, request.buildPath, request.fromOffset, request.revision);
+  const rows = buildIndexFile(request.buildPath, request.reason, request.revision);
   return { type: "built", rows };
 }
 

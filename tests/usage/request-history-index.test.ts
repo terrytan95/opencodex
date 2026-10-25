@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
   appendFileSync,
@@ -24,8 +24,6 @@ import {
 } from "../../src/usage/log";
 import {
   closeRequestHistoryIndex,
-  openRequestHistoryIndexSync,
-  requestHistoryDb,
   queryRequestHistory,
   rebuildRequestHistoryIndex,
   requestHistoryRowById,
@@ -190,40 +188,6 @@ describe("request-history index (RI-02)", () => {
     expect(after.meta.indexedRows).toBe(6);
     expect(after.meta.indexedOffset).toBeGreaterThan(offsetAfterInitial);
     expect(after.meta.lastError).not.toMatch(/identity changed/i);
-  });
-
-  test("an open index is reused without repeating a database integrity scan", async () => {
-    appendUsageEntry(entry("integrity", 1234));
-    await queryRequestHistory({});
-    const query = spyOn(requestHistoryDb(), "query");
-    try {
-      for (let i = 0; i < 16; i++) openRequestHistoryIndexSync();
-      expect(query.mock.calls.some(([sql]) => String(sql).includes("quick_check"))).toBe(false);
-    } finally {
-      query.mockRestore();
-    }
-  });
-
-  test("version two rebuilds attempt targets and duplicate rows cannot add false targets", async () => {
-    const original = entry("attempts", 1234, "final", "model", {
-      attempts: [
-        { ordinal: 1, adapter: "openai-chat", sendCount: 1, recoveryKinds: [], usageStatus: "reported", provider: "first", model: "m", status: 503, durationMs: 100 },
-        { ordinal: 1, adapter: "openai-chat", sendCount: 1, recoveryKinds: [], usageStatus: "reported", provider: "final", model: "model", status: 200, durationMs: 100 },
-      ],
-    });
-    appendUsageEntry(original);
-    await queryRequestHistory({});
-    const db = requestHistoryDb();
-    db.exec("DROP TABLE request_attempt_targets");
-    setMeta(db, "schema_version", 2);
-    await queryRequestHistory({});
-    appendUsageEntry({ ...original, attempts: [
-      { ordinal: 1, adapter: "openai-chat", sendCount: 1, recoveryKinds: [], usageStatus: "reported", provider: "false", model: "target", status: 500, durationMs: 1 },
-      { ordinal: 1, adapter: "openai-chat", sendCount: 1, recoveryKinds: [], usageStatus: "reported", provider: "final", model: "model", status: 200, durationMs: 1 },
-    ] });
-    await queryRequestHistory({});
-    expect(requestHistoryDb().query("SELECT provider FROM request_attempt_targets ORDER BY provider").all())
-      .toEqual([{ provider: "final" }, { provider: "first" }]);
   });
 
   test("appended rows are ingested as a tail, never a full rebuild", async () => {

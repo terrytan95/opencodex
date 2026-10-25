@@ -3,7 +3,7 @@
  *
  * `usage.jsonl` stays canonical; this module maintains a rebuildable SQLite
  * projection (ADR-1, ADR-8). On every open/query it verifies schema version,
- * file identity and byte offset, then appends whatever complete
+ * file identity, integrity, and byte offset, then appends whatever complete
  * JSONL rows arrived since the last index. Missing/corrupt/stale index or a
  * replaced/truncated source triggers an automatic full rebuild; canonical
  * history is never touched.
@@ -258,7 +258,6 @@ function openIndexDb(): Database {
   let handle: Database | undefined;
   try {
     handle = new Database(path, { create: true });
-    if (!isHealthy(handle)) throw new Error("request-history integrity check failed");
     handle.exec("PRAGMA journal_mode = WAL");
     handle.exec("PRAGMA busy_timeout = 5000");
     handle.exec(HISTORY_DDL);
@@ -289,6 +288,10 @@ function ensureSchemaAndIdentity(dbHandle: Database): "ready" | "rebuilt" {
     const storedVersion = metaValue(dbHandle, HISTORY_META_KEYS.schemaVersion);
     if (storedVersion !== String(HISTORY_SCHEMA_VERSION)) {
       destroyAndRecreate(dbPath, `schema version ${storedVersion ?? "missing"} -> ${HISTORY_SCHEMA_VERSION}`);
+      return "rebuilt";
+    }
+    if (!isHealthy(dbHandle)) {
+      destroyAndRecreate(dbPath, "integrity check failed; index rebuilt");
       return "rebuilt";
     }
     const revision = sourceIdentity();
@@ -333,7 +336,7 @@ function workerCoolingDown(): boolean {
   return workerFailure !== null && Date.now() - workerFailure.at < WORKER_FAILURE_COOLDOWN_MS;
 }
 
-function startWorkerRebuild(reason: string, revision: UsageLogRevision, fromOffset?: number): WorkerRebuild | null {
+function startWorkerRebuild(reason: string, revision: UsageLogRevision): WorkerRebuild | null {
   let job: RebuildJob;
   try {
     job = createRebuildJob();
@@ -344,7 +347,7 @@ function startWorkerRebuild(reason: string, revision: UsageLogRevision, fromOffs
   const indexPath = dbPath || indexDbPath();
   const buildPath = buildFilePath(indexPath, process.pid, ++buildSequence);
   const rebuild: { job: RebuildJob; promise: Promise<void> } = { job, promise: Promise.resolve() };
-  rebuild.promise = job.build(indexPath, buildPath, reason, revision, fromOffset)
+  rebuild.promise = job.build(indexPath, buildPath, reason, revision)
     .then(() => {
       if (lifetime !== indexLifetime) throw new RequestHistoryIndexClosedError();
       installBuild(buildPath, indexPath);
@@ -425,14 +428,6 @@ function refreshLockedSync(caller: RefreshCaller): RequestHistoryIndexMeta {
     return metaFor(handle);
   }
   if (tailNextOffset < Number(revision.size)) {
-    if (Number(revision.size) > current.sourceSize
-      && Number(revision.size) - tailNextOffset >= workerRebuildMinBytes) {
-      if (!workerCoolingDown()) {
-        const tail = startWorkerRebuild("catching up appended history", revision, tailNextOffset);
-        if (tail) throw new RebuildHandedOff(tail);
-      }
-      if (caller === "routing") throw new RequestHistoryIndexBusyError();
-    }
     const inserted = ingestSourceTail(handle, revision.path, tailNextOffset);
     // A clean tail ingest proves the index is healthy: clear any earlier
     // rebuild marker so status readers can distinguish rebuilds from tails.

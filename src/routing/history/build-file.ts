@@ -10,39 +10,10 @@ import { Database } from "bun:sqlite";
 import { readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { UsageLogRevision } from "../../usage/log";
-import { ingestSourceTail, metaValue, recordSourceMeta, RequestHistoryIndexStaleError, resetAndCreateSchema, setMeta } from "./ingest";
+import { ingestSourceTail, recordSourceMeta, resetAndCreateSchema, setMeta } from "./ingest";
 import { HISTORY_META_KEYS } from "./schema";
 
 const BUILD_SIDE_FILES = ["", "-journal", "-wal", "-shm"] as const;
-
-/** Seed a private build in SQLite, preserving cancellation/replacement isolation without reparsing history. */
-export function appendIndexFile(indexPath: string, buildPath: string, fromOffset: number, revision: UsageLogRevision): number {
-  removeBuildFiles(buildPath);
-  const source = new Database(indexPath, { readonly: true });
-  try {
-    source.query("VACUUM INTO ?").run(buildPath);
-  } finally {
-    source.close();
-  }
-  const handle = new Database(buildPath, { readwrite: true });
-  try {
-    if (Number(metaValue(handle, HISTORY_META_KEYS.indexedOffset)) !== fromOffset
-      || metaValue(handle, HISTORY_META_KEYS.sourceDev) !== revision.dev
-      || metaValue(handle, HISTORY_META_KEYS.sourceIno) !== revision.ino) {
-      throw new RequestHistoryIndexStaleError("request-history index changed before catch-up");
-    }
-    handle.exec("PRAGMA journal_mode = MEMORY");
-    handle.exec("PRAGMA synchronous = OFF");
-    const inserted = ingestSourceTail(handle, revision.path, fromOffset, {
-      expected: revision, endOffset: Number(revision.size),
-    });
-    if (inserted > 0) setMeta(handle, HISTORY_META_KEYS.lastError, "");
-    handle.exec("PRAGMA journal_mode = WAL");
-    return inserted;
-  } finally {
-    handle.close();
-  }
-}
 
 export function buildFilePath(indexPath: string, pid: number, sequence: number): string {
   return `${indexPath}.rebuild-${pid}-${sequence}`;

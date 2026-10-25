@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendUsageEntry, resetUsageReadCacheForTests, type PersistedUsageEntry } from "../../src/usage/log";
-import { closeRequestHistoryIndex, openRequestHistoryIndexSync, requestHistoryDb } from "../../src/routing/history/indexer";
+import { closeRequestHistoryIndex } from "../../src/routing/history/indexer";
 import {
   clearHealthHistoryCacheForTests,
   codexPoolHealthEvidence,
@@ -74,32 +74,6 @@ function config(overrides: Partial<OcxConfig> = {}): OcxConfig {
 }
 
 describe("health-aware scoring (RI-06)", () => {
-  test("retry evidence uses an indexed exact target even with JSON-escaped model names", () => {
-    const model = 'vendor/"quoted"%_model';
-    appendUsageEntry(row("escaped", 200, 300, {
-      provider: "final", model: "other",
-      attempts: [
-        { ordinal: 1, adapter: "openai-chat", sendCount: 1, recoveryKinds: [], usageStatus: "reported", provider: "first", model, status: 503, durationMs: 100 },
-        { ordinal: 1, adapter: "openai-chat", sendCount: 1, recoveryKinds: [], usageStatus: "reported", provider: "first", model, status: 503, durationMs: 100 },
-        { ordinal: 1, adapter: "openai-chat", sendCount: 1, recoveryKinds: [], usageStatus: "reported", provider: "final", model: "other", status: 200, durationMs: 100 },
-      ],
-    }));
-    openRequestHistoryIndexSync();
-    const handle = requestHistoryDb();
-    const query = spyOn(handle, "query");
-    let sql = "";
-    try {
-      const evidence = healthEvidenceForCandidate({ ordinal: 1, adapter: "openai-chat", sendCount: 1, recoveryKinds: [], usageStatus: "reported", provider: "first", model });
-      expect(evidence.sampleCount).toBe(2);
-      expect(evidence.successRate).toBe(0);
-      sql = String(query.mock.calls.find(([text]) => String(text).includes("JOIN requests"))?.[0]);
-    } finally { query.mockRestore(); }
-    const plan = handle.query("EXPLAIN QUERY PLAN " + sql)
-      .all("first", model, 0, "first", model, 100) as Array<{ detail: string }>;
-    expect(plan.some(row => /SEARCH a USING PRIMARY KEY/.test(row.detail))).toBe(true);
-    expect(plan.some(row => /SCAN (a|r)\b/.test(row.detail))).toBe(false);
-  });
-
   test("historical evidence derives success rate, consecutive failures, latency, samples", async () => {
     for (let index = 0; index < 23; index++) {
       appendUsageEntry(row(`ok-${index}`, 200, 1000 + index));

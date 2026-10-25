@@ -7,7 +7,7 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { closeSync, fstatSync, openSync, readSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readSync, type BigIntStats } from "node:fs";
 import {
   encodePersistedRequestedModel,
   exactFileIdentity,
@@ -22,6 +22,20 @@ export const REQUEST_HISTORY_READ_CHUNK_BYTES = 64 * 1024;
 // this bound are omitted from the projection; the canonical usage.jsonl is
 // never truncated or rewritten by the indexer.
 export const REQUEST_HISTORY_MAX_RECORD_BYTES = 1024 * 1024;
+
+// One small observation per live database handle, never retained ledger bytes. An
+// unterminated tail cannot advance indexedOffset, but need not be reread until its
+// exact file revision changes. The indexer's schema/identity/quick_check gates still run.
+const tailObservations = new WeakMap<Database, {
+  path: string;
+  revision: string;
+  nextOffset: number;
+  endOffset: number | undefined;
+}>();
+
+function tailRevision(stat: BigIntStats): string {
+  return [stat.dev, stat.ino, stat.birthtimeNs, stat.size, stat.mtimeNs, stat.ctimeNs].join(":");
+}
 
 /** The ledger at the recorded path is no longer the file the rebuild started from. */
 export class RequestHistoryIndexStaleError extends Error {
@@ -51,7 +65,7 @@ function metaNumber(dbHandle: Database, key: string): number {
 }
 
 export function resetAndCreateSchema(dbHandle: Database): void {
-  dbHandle.exec("DROP TABLE IF EXISTS request_attempt_targets");
+  tailObservations.delete(dbHandle);
   dbHandle.exec("DROP TABLE IF EXISTS requests");
   dbHandle.exec("DROP TABLE IF EXISTS schema_meta");
   dbHandle.exec(HISTORY_DDL);
@@ -63,6 +77,7 @@ export function resetAndCreateSchema(dbHandle: Database): void {
 }
 
 export function recordSourceMeta(dbHandle: Database, revision: UsageLogRevision | null): void {
+  tailObservations.delete(dbHandle);
   setMeta(dbHandle, HISTORY_META_KEYS.sourcePath, revision?.path ?? "");
   setMeta(dbHandle, HISTORY_META_KEYS.sourceDev, revision?.dev ?? 0);
   setMeta(dbHandle, HISTORY_META_KEYS.sourceIno, revision?.ino ?? 0);
@@ -156,21 +171,15 @@ export function ingestSourceTail(
   options: IngestOptions = {},
 ): number {
   let inserted = 0;
-  let pending: Array<{ row: Array<string | number | null>; targets: Array<[string, string, number, string]> }> = [];
+  let pending: Array<Array<string | number | null>> = [];
   const insert = dbHandle.prepare(ROW_INSERT);
-  let insertTarget: ReturnType<Database["prepare"]> | undefined;
   let fd: number | undefined;
   try {
-    insertTarget = dbHandle.prepare(
-      "INSERT OR IGNORE INTO request_attempt_targets (provider, model, timestamp, request_id) VALUES (?, ?, ?, ?)",
-    );
     const commitBatch = () => {
-      dbHandle.transaction((rows: typeof pending) => {
-        for (const { row, targets } of rows) {
+      dbHandle.transaction((rows: Array<Array<string | number | null>>) => {
+        for (const row of rows) {
           // `changes` counts real inserts only; INSERT OR IGNORE replays add 0.
-          const changes = insert.run(...row).changes;
-          inserted += changes;
-          if (changes > 0) for (const target of targets) insertTarget!.run(...target);
+          inserted += insert.run(...row).changes;
         }
       })(pending);
       pending = [];
@@ -178,20 +187,12 @@ export function ingestSourceTail(
     const ingestLine = (line: Buffer) => {
       const entry = parsedEntryFromLine(line.toString("utf-8"));
       if (!entry) return;
-      const targets: Array<[string, string, number, string]> = [];
-      if (Array.isArray(entry.attempts) && entry.attempts.length > 1) {
-        for (const attempt of entry.attempts) {
-          if (typeof attempt?.provider === "string" && typeof attempt.model === "string") {
-            targets.push([attempt.provider, attempt.model, entry.timestamp, entry.requestId]);
-          }
-        }
-      }
-      pending.push({ row: extractRow(entry), targets });
+      pending.push(extractRow(entry));
       if (pending.length >= REQUEST_HISTORY_INSERT_BATCH) commitBatch();
     };
 
     fd = openSync(path, "r");
-    const stat = fstatSync(fd);
+    const stat = fstatSync(fd, { bigint: true });
     const expected = options.expected;
     if (expected) {
       const opened = exactFileIdentity(fd);
@@ -199,6 +200,12 @@ export function ingestSourceTail(
         throw new RequestHistoryIndexStaleError("usage log changed before indexing");
       }
     }
+    const revision = tailRevision(stat);
+    const observed = tailObservations.get(dbHandle);
+    if (observed?.path === path && observed.revision === revision
+      && observed.nextOffset === fromOffset && observed.endOffset === options.endOffset) return 0;
+    // A failed or interrupted attempt must never publish a reusable observation.
+    tailObservations.delete(dbHandle);
     const size = options.endOffset === undefined
       ? Number(stat.size)
       : Math.min(Number(stat.size), options.endOffset);
@@ -245,14 +252,16 @@ export function ingestSourceTail(
     setMeta(dbHandle, HISTORY_META_KEYS.indexedOffset, nextOffset);
     setMeta(dbHandle, HISTORY_META_KEYS.indexedRows, indexedRows + inserted);
     setMeta(dbHandle, HISTORY_META_KEYS.sourceSize, size);
-    setMeta(dbHandle, HISTORY_META_KEYS.sourceMtimeMs, Number(stat.mtimeMs));
+    setMeta(dbHandle, HISTORY_META_KEYS.sourceMtimeMs, Number(stat.mtimeNs) / 1_000_000);
     setMeta(dbHandle, HISTORY_META_KEYS.builtAtMs, Date.now());
+    if (nextOffset < size && tailRevision(fstatSync(fd, { bigint: true })) === revision) {
+      tailObservations.set(dbHandle, { path, revision, nextOffset, endOffset: options.endOffset });
+    }
     return inserted;
   } finally {
     if (fd !== undefined) closeSync(fd);
     // Windows file locks: an unterminated prepared statement keeps the DB
     // file busy after close (verified on Bun 1.3.14). Finalize always.
     insert.finalize();
-    insertTarget?.finalize();
   }
 }
