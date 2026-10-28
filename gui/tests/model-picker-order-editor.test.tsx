@@ -11,7 +11,7 @@ import type { PickerModelIdentity, PickerOrderSettings, PickerOrderSaved } from 
 const globals = ["document", "window", "navigator", "localStorage", "sessionStorage", "fetch", "crypto", "IS_REACT_ACT_ENVIRONMENT"] as const;
 const ids: PickerModelIdentity[] = ["f", "a", "b", "c"].map(id => ({ provider: "p", id, namespaced: `p/${id}` }));
 const initial = (): PickerOrderSettings => ({ pickerAvailable: ["p/f", "p/a", "p/b", "p/c"],
-  chosen: ["native", "p/f"], pickerOrder: ["p/f", "p/a", "p/b", "p/c"], pickerOrderMode: null });
+  chosen: ["native", "p/f"], pickerOrder: ["p/a", "p/b", "p/c", "p/f"], pickerOrderMode: null });
 const changedDraft = ["p/f", "p/b", "p/a", "p/c"];
 function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (error: Error) => void;
@@ -125,7 +125,7 @@ test("entering Custom reads a fresh GET each activation and only renders pickerA
   expect(order()).toEqual(["p/f", "p/a", "p/b", "p/c"]); expect(busy.at(-1)).toBe(false);
   await render("/a", ids, false); await render(); expect(requests).toHaveLength(2);
   await reply(1, { ...initial(), pickerOrder: ["p/c", "p/b", "p/a"] });
-  expect(order()).toEqual(["p/c", "p/b", "p/a", "p/f"]);
+  expect(order()).toEqual(["p/f", "p/c", "p/b", "p/a"]);
 });
 
 for (const [name, override] of [
@@ -138,23 +138,16 @@ for (const [name, override] of [
   expect(button("Save draft").disabled).toBe(true);
   await click("Save draft"); expect(requests).toHaveLength(1);
 });
-test("native and featured models can move across each other and save their exact order", async () => {
-  const settings = { ...initial(), pickerAvailable: ["native", ...initial().pickerAvailable], pickerOrder: ["native", "p/a", "p/f", "p/b", "p/c"] };
-  await render(); await reply(0, settings);
-  expect(order()).toEqual(settings.pickerOrder);
-  await drop("p/f", "native");
-  await click("Move native down");
-  expect(order()).toEqual(["p/f", "p/a", "native", "p/b", "p/c"]);
-  await click("Save draft"); await reply(1, settings);
-  expect(requests[2]?.body).toEqual({ pickerOrder: order(), pickerOrderMode: null });
-  await reply(2, { ok: true, pickerOrder: order(), pickerOrderMode: null });
-  await click("Reload and discard draft"); await reply(3, { ...settings, pickerOrder: order() });
-  expect(order()).toEqual(["p/f", "p/a", "native", "p/b", "p/c"]);
+test("saved bare native order remains locked without sending a replacement", async () => {
+  await render(); await reply(0, { ...initial(), pickerOrder: ["native", "p/a"] });
+  expect(host.textContent).toContain("This saved order includes native models.");
+  expect(button("Save draft").disabled).toBe(true); expect(receipts).toEqual([]);
+  expect(requests.map(r => r.method)).toEqual(["GET"]);
 });
 
 test("forward/backward drop and Up/Down controls submit the complete routed list only", async () => {
   await render(); await reply(0, initial());
-  expect(button("Move p/f down").disabled).toBe(false); expect(button("Move p/a up").disabled).toBe(false);
+  expect(button("Move p/f down").disabled).toBe(true); expect(button("Move p/a up").disabled).toBe(true);
   await drop("p/a", "p/c"); expect(order()).toEqual(["p/f", "p/b", "p/a", "p/c"]);
   await drop("p/c", "p/b"); expect(order()).toEqual(["p/f", "p/c", "p/b", "p/a"]);
   button("Move p/c down").focus(); await click("Move p/c down");
@@ -168,16 +161,16 @@ test("forward/backward drop and Up/Down controls submit the complete routed list
   expect(requests[2]?.body).toEqual({ pickerOrder: changedDraft, pickerOrderMode: null });
 });
 
-test("external, self and expired drag tokens cannot reorder", async () => {
+test("external, self, fixed and expired drag tokens cannot reorder", async () => {
   await render(); await reply(0, initial());
   const original = ["p/f", "p/a", "p/b", "p/c"], external = transfer();
   external.setData("application/x-ocx-picker-order", "external");
   await dragEvent(row("p/b"), "drop", external); expect(order()).toEqual(original);
-  await drop("p/a", "p/a"); expect(order()).toEqual(original);
+  await drop("p/a", "p/a"); await drop("p/a", "p/f"); expect(order()).toEqual(original);
   const local = transfer(); await dragEvent(button("Drag p/a"), "dragstart", local);
   const wrongType = transfer(); wrongType.setData("text/plain", "p/a");
   expect(await dragEvent(row("p/b"), "dragover", wrongType)).toBe(false);
-  expect(await dragEvent(row("p/f"), "dragover", local)).toBe(true);
+  expect(await dragEvent(row("p/f"), "dragover", local)).toBe(false);
   expect(await dragEvent(row("p/b"), "dragover", local)).toBe(true);
   await dragEvent(row("p/b"), "drop", external); expect(order()).toEqual(original);
   await dragEvent(row("p/b"), "drop", local); expect(order()).toEqual(original);
@@ -188,7 +181,7 @@ test("external, self and expired drag tokens cannot reorder", async () => {
 
 test("preflight roster drift blocks PUT, preserves draft, and requires explicit reload", async () => {
   await edit(); await click("Save draft");
-  const updated = { ...initial(), chosen: ["p/b"], pickerOrder: ["p/b", "p/a", "p/c", "p/f"] };
+  const updated = { ...initial(), chosen: ["p/b"] };
   await reply(1, updated);
   expect(order()).toEqual(changedDraft); expect(button("Save draft").disabled).toBe(true);
   expect(host.textContent).toContain("Picker settings changed.");
@@ -196,9 +189,10 @@ test("preflight roster drift blocks PUT, preserves draft, and requires explicit 
   await click("Reload and discard draft"); expect(order()).toEqual(changedDraft);
   await reply(2, updated); expect(order()).toEqual(["p/b", "p/a", "p/c", "p/f"]);
   expect(button("Move p/a down").disabled).toBe(false); expect(receipts).toEqual([]);
-  expect(button("Drag p/b").disabled).toBe(false);
+  expect(button("Drag p/b").disabled).toBe(true);
   expect(button("Drag p/f").disabled).toBe(false);
-  expect(button("Move p/a up").disabled).toBe(false);
+  expect(button("Move p/a up").disabled).toBe(true);
+  await drop("p/b", "p/f"); expect(order()).toEqual(["p/b", "p/a", "p/c", "p/f"]);
   await drop("p/f", "p/a"); expect(order()).toEqual(["p/b", "p/f", "p/a", "p/c"]);
   await click("Save draft"); await reply(3, updated);
   expect(requests[4]?.body).toEqual({ pickerOrder: ["p/b", "p/f", "p/a", "p/c"], pickerOrderMode: null });
@@ -268,7 +262,7 @@ for (const stage of stages) {
     expect(requests).toHaveLength(count); expect(receipts).toEqual([]); expect(order()).toEqual([]);
     expect(busy).toEqual(settledBusy); // Old finally must not clear the successor's busy state.
     await reply(current, { ...initial(), pickerOrder: ["p/c", "p/a", "p/b"] });
-    expect(order()).toEqual(["p/c", "p/a", "p/b", "p/f"]);
+    expect(order()).toEqual(["p/f", "p/c", "p/a", "p/b"]);
   });
   test(`identity drift during ${stage} suppresses stale snapshot, PUT and receipt publication`, async () => {
     const settle = await pauseAt(stage), count = requests.length;
@@ -287,9 +281,9 @@ for (const stage of stages) {
 
 for (const chosen of [[""], ["  "]]) test(`blank chosen ${JSON.stringify(chosen)} keeps routed editing available`, async () => {
   await render(); await reply(0, { ...initial(), chosen });
-  expect(order()).toEqual(initial().pickerOrder);
+  expect(order()).toEqual(["p/a", "p/b", "p/c", "p/f"]);
   expect(host.querySelector('[role="alert"]')).toBeNull();
-  expect(button("Move p/f down").disabled).toBe(false);
+  expect(button("Move p/f up").disabled).toBe(false);
   await click("Move p/a down"); expect(button("Save draft").disabled).toBe(false);
 });
 
@@ -342,14 +336,14 @@ test("fresh legacy featured settings cannot unlock a row missing from the model 
   await render("/a", [a, { provider: "p", id: "team/model", namespaced: "p/team-model" }]);
   await click("Reload and discard draft"); await reply(2, settings);
   expect(order()).toEqual(["p/team-model", "p/a"]);
-  expect(button("Drag p/team-model").disabled).toBe(false);
+  expect(button("Drag p/team-model").disabled).toBe(true);
   expect(requests.map(r => r.method)).toEqual(["GET", "GET", "GET"]);
 });
 
 test("duplicate featured choices use last occurrence and padded roster strings do not lock rows", async () => {
-  await render(); await reply(0, { ...initial(), chosen: ["p/a", "p/b", "p/a", " p/c "], pickerOrder: [] });
-  expect(order()).toEqual(["p/b", "p/a", "p/f", "p/c"]);
-  expect(button("Drag p/b").disabled).toBe(false); expect(button("Drag p/a").disabled).toBe(false);
+  await render(); await reply(0, { ...initial(), chosen: ["p/a", "p/b", "p/a", " p/c "] });
+  expect(order()).toEqual(["p/b", "p/a", "p/c", "p/f"]);
+  expect(button("Drag p/b").disabled).toBe(true); expect(button("Drag p/a").disabled).toBe(true);
   expect(button("Drag p/c").disabled).toBe(false);
 });
 
@@ -381,15 +375,15 @@ test("Models pins cache-inferred Custom across late parent GET publication, then
   const initialReads = requests.map((request, index) => ({ request, index }));
   expect(initialReads).toHaveLength(2);
   for (const { index } of initialReads) await reply(index, custom);
-  expect(order()).toEqual(["p/c", "p/a", "p/f", "p/b"]);
+  expect(order()).toEqual(["p/f", "p/c", "p/a", "p/b"]);
   await click("Move p/a down"); const editor = host.querySelector(".picker-order-editor");
-  expect(order()).toEqual(["p/c", "p/f", "p/a", "p/b"]); expect(button("Save draft").disabled).toBe(false);
+  expect(order()).toEqual(["p/f", "p/c", "p/b", "p/a"]); expect(button("Save draft").disabled).toBe(false);
   // Integration seam: publish the same parent resource state a late GET would install.
   const late = deferred<PickerOrderSettings>();
   const publication = late.promise.then(value => setClientResourceData("ocx.models.catalog.v1:/a:picker-order", value));
   await act(async () => { late.resolve({ ...initial(), pickerOrderMode: "provider" }); await publication; });
   expect(host.querySelector(".picker-order-editor")).toBe(editor);
-  expect(order()).toEqual(["p/c", "p/f", "p/a", "p/b"]); expect(button("Save draft").disabled).toBe(false);
+  expect(order()).toEqual(["p/f", "p/c", "p/b", "p/a"]); expect(button("Save draft").disabled).toBe(false);
   expect(requests.every(r => r.method === "GET")).toBe(true);
   await act(async () => { root!.render(<LanguageProvider><Models apiBase="/b" /></LanguageProvider>); });
   expect(host.querySelector(".picker-order-editor")).toBeNull();

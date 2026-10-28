@@ -94,7 +94,7 @@ export function modelPickerOrder(
 
 /** Resolve exact canonical ids before legacy provider/raw spellings; never guess a bare native id. */
 export function normalizePickerIds(ids: readonly string[], available: readonly string[], identities: readonly PickerModelIdentity[]): string[] {
-  const candidates = new Set(available);
+  const candidates = new Set(available.filter(id => id.includes("/")));
   const resolve = (id: string): string | undefined => {
     if (candidates.has(id)) return id;
     const matches = new Set(identities.filter(row => candidates.has(row.namespaced)
@@ -122,15 +122,16 @@ export function pickerIdentityCoverage(available: readonly string[], identities:
   });
 }
 
-export function customPickerRows(settings: PickerOrderSettings, identities: readonly PickerModelIdentity[]): { order: string[]; featured: string[] } | null {
-  if (settings.chosen === undefined) return null;
-  const available = [...new Set(settings.pickerAvailable)];
+export function customPickerRows(settings: PickerOrderSettings, identities: readonly PickerModelIdentity[]): { order: string[]; fixed: string[] } | null {
+  // Unknown featured state and complete/native orders cannot safely become routed-only drafts.
+  if (settings.chosen === undefined || settings.pickerOrder.some(id => !id.includes("/"))) return null;
+  const available = [...new Set(settings.pickerAvailable.filter(id => id.includes("/")))];
   if (!pickerIdentityCoverage(available, identities)) return null;
   // Roster strings stay verbatim. Map uses the LAST occurrence; each row prefers its exact canonical rank.
   const chosenRank = new Map(settings.chosen.map((id, index) => [id, index]));
   const rawBySlug = new Map(identities.map(row => [row.namespaced, `${row.provider}/${row.id}`]));
   const rankOf = (slug: string) => chosenRank.get(slug) ?? chosenRank.get(rawBySlug.get(slug)!);
-  const featured = available.filter(slug => rankOf(slug) !== undefined).sort((a, b) => rankOf(a)! - rankOf(b)!);
+  const fixed = available.filter(slug => rankOf(slug) !== undefined).sort((a, b) => rankOf(a)! - rankOf(b)!);
   const saved = normalizePickerIds(settings.pickerOrder, available, identities);
-  return { featured, order: [...new Set([...saved, ...featured, ...available])] };
+  return { fixed, order: [...new Set([...fixed, ...saved, ...available])] };
 }
