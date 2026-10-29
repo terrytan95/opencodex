@@ -77,7 +77,7 @@ import { anthropicSessionKeyFromParts } from "../../oauth/anthropic-routing";
 import { configuredAnthropicInstance } from "../../providers/anthropic-instance";
 import { isTranslatorBudgetExceededError } from "../../lib/translator-budget";
 import { bindTurnTerminationScope, rememberDeliveredFinalAnswer } from "../../responses/turn-termination";
-import { observeCacheDiagnosticInbound, rebindCacheDiagnosticBody, requestLogSpeedLabel, readConfiguredCodexServiceTier } from "../request-log";
+import { noteCodexSelectionAffinity, observeCacheDiagnosticInbound, rebindCacheDiagnosticBody, requestLogSpeedLabel, readConfiguredCodexServiceTier } from "../request-log";
 import type { RouteResult } from "../../router";
 import {
   captureRouteStaticPolicy,
@@ -667,7 +667,7 @@ export async function prepareResponsesRequest(
     || secondaryProvider.authMode === "oauth" && configuredAnthropicInstance(config, "anthropic2") !== "anthropic2")) {
     return formatErrorResponse(401, "authentication_error", "Anthropic Pool 2 requires an enabled configured provider");
   }
-  const admissionScope = resolveAdmissionModelScope(config, options.admission);
+  const admissionScope = options.admissionScope ?? resolveAdmissionModelScope(config, options.admission);
   const captureInboundRoutePolicy = (candidate: RouteResult, captureRequestPolicy = true): RouteResult => {
     // Router-collapsed aliases bypass the combo loop. Re-pick before capturing destination
     // policy so random/RR cannot refuse while an unmetered target is still usable.
@@ -1588,10 +1588,7 @@ export async function prepareResponsesRequest(
   // A move is the expensive event: it discards the prefix warmed on the previous account. Record
   // it as an event with its cause, so the operator reads it off one line instead of inferring it
   // from account labels across many (#4546).
-  if (admissionState.authCtx.kind === "pool" && admissionState.authCtx.affinityDecision) {
-    logCtx.affinity = admissionState.authCtx.affinityDecision.move;
-    logCtx.affinityReason = admissionState.authCtx.affinityDecision.reason;
-  }
+  noteCodexSelectionAffinity(logCtx, admissionState.authCtx);
   {
     const binding = conversationStateBindingFromAuth(admissionState.authCtx, poolAffinityKey);
     if (binding) {
@@ -1605,6 +1602,7 @@ export async function prepareResponsesRequest(
       if (refusal) return refusal;
       applyAccountChangeConversationStateScrub({
         body: parsed._rawBody,
+        headers: selectedForwardHeaders,
         parsed,
         preserveReasoningEncryptedContent: isCanonicalOpenAiForwardProvider(route.provider)
           && parsed._nativeReasoningRetention?.accountSwitch === true,
