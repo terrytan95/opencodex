@@ -58,7 +58,7 @@ export interface ObservedCatalogEntryBuildInput {
   readonly gptSlugs: readonly string[];
   readonly goModels: readonly CatalogModel[];
   readonly featured?: readonly string[];
-  /** Saved display order; final publication ranks featured, native and routed rows together. */
+  /** Optional full picker ordering (config.modelPickerOrder); orders non-featured rows. */
   readonly modelPickerOrder?: readonly string[];
   readonly wsEnabled: boolean;
   readonly multiAgentMode: MultiAgentMode;
@@ -178,7 +178,7 @@ export function buildCatalogEntriesFromObservedState({
    * Scope: only the generic routed `<provider>/<model>` rows call this (see the goModels loop
    * below). Native passthrough rows and account-qualified native rows keep their own priority
    * logic and are intentionally not reordered in this legacy builder pass. The final merge can
-   * apply complete ordering for every nonempty configured list.
+   * apply complete ordering when the configured list includes a bare id.
    */
   const pickerOrderPriority = (slug: string, altSlug?: string): number | undefined => {
     if (!pickerOrderActive) return undefined;
@@ -368,12 +368,16 @@ export function orderForModelPicker(
   if (pickerOrder.length === 0) return [...models];
   const pickerRank = modelPickerRank(pickerOrder);
   const featuredRank = modelPickerRank(featured);
+  const complete = pickerOrder.some(slug => !slug.includes("/"));
   const rank = (model: CatalogModel): number => {
     const slug = catalogModelSlug(model);
     const featuredIndex = featuredRank(slug) ?? featuredRank(`${model.provider}/${model.id}`);
     const natural = featuredIndex ?? 5;
     const index = pickerRank(slug) ?? pickerRank(`${model.provider}/${model.id}`);
-    return index ?? pickerOrder.length + natural;
+    if (complete) return index ?? pickerOrder.length + natural;
+    // Preserve the legacy featured/alias bands, including unlisted rows before listed rows.
+    if (featuredIndex !== undefined || model.nativeAlias === true) return natural;
+    return index === undefined ? natural : PICKER_ORDER_PRIORITY_BASE + index;
   };
   return [...models].sort((a, b) => rank(a) - rank(b));
 }
@@ -471,7 +475,7 @@ function modelPickerRank(order: readonly string[]): (slug: string) => number | u
 /** Complete display ordering retains natural ranks for OpenCodex's separate guidance projection. */
 export function applyFullModelPickerOrder(entries: RawEntry[], order: readonly string[]): void {
   const pickerOrder = normalizeModelPickerOrder(order);
-  if (pickerOrder.length === 0) return;
+  if (!pickerOrder.some(slug => !slug.includes("/"))) return;
   const rankOf = modelPickerRank(pickerOrder);
   for (const entry of entries) {
     if (isCodexControlPlaneModel(entry.slug)) continue;
@@ -792,7 +796,11 @@ export function mergeCatalogEntriesFromObservedState({
     // remain outside provider ownership and survive unless a fresh row replaces their exact slug.
     return !isOcxAuthoredRoutedEntry(entry);
   });
-  // Retained rows refresh natural ranks before the final display-order pass.
+  // Retained rows bypass the builder. Recompute managed spawn ranks from current config
+  // before either display-order mode; a saved display override is not current roster authority.
+  const pickerOrder = normalizeModelPickerOrder(modelPickerOrder);
+  const fullPickerOrder = pickerOrder.some(slug => !slug.includes("/"));
+  const rankOf = modelPickerRank(pickerOrder);
   const featuredRankOf = modelPickerRank(featured);
   const priorityStride = Math.max(accountSelectors.length, 1);
   for (const entry of preservedRoutedEntries) {
@@ -817,6 +825,12 @@ export function mergeCatalogEntriesFromObservedState({
     entry.priority = featuredRank !== undefined
       ? featuredRank * priorityStride
       : (accountSelectors.length > 0 ? 1_000 : 0) + 5;
+    if (featuredRank !== undefined || fullPickerOrder) continue;
+    const pickerIndex = rankOf(slug);
+    if (pickerIndex !== undefined) {
+      entry[SPAWN_PRIORITY_FIELD] = entry.priority;
+      entry.priority = PICKER_ORDER_PRIORITY_BASE + pickerIndex * priorityStride;
+    }
   }
   let finalRoutedEntries = [...admittedRoutedEntries, ...preservedRoutedEntries];
   finalRoutedEntries = finalRoutedEntries.filter(entry => {

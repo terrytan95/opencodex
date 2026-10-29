@@ -124,9 +124,9 @@ not restricted to those five advertised rows. V1 receives no OpenCodex preferred
 injection; V2 can additionally receive natural-priority guidance when its catalog state permits.
 The helper tests pin guidance behavior, not native tool-description equivalence.
 
-Every nonempty `modelPickerOrder` orders the complete picker, including featured and native
-rows. Listed ids lead; unlisted rows follow in natural priority order. Exact ids take precedence
-over raw/encoded equivalents; empty lists retain default priorities. This does not change the separate `opencodex_spawn_priority` contract.
+A nonblank bare id in `modelPickerOrder` opts into complete-picker display ordering. Exact
+ids take precedence over raw/encoded equivalents; routed-only and empty lists keep the legacy
+ordering behavior. This does not change the separate `opencodex_spawn_priority` contract.
 Retained rows recompute their natural ranks from the current featured roster and account-selector
 stride before display order is applied, so a discovery outage cannot preserve an obsolete
 featured or picker rank. Canonical `opencode-go` rows retain their configured reasoning ladder
@@ -484,7 +484,7 @@ behaviors.
 
 ### Saved picker presets
 
-The Models page saves complete visible-model snapshots in `modelPickerOrder` and records their origin in
+The Models page saves routed snapshots in `modelPickerOrder` and records their origin in
 `modelPickerOrderMode` (`alphabetical`, `provider`, `most-used`). Mode is UI provenance, not a
 catalog sorting policy: catalog writers consume the saved array. Routed-only featured/native
 bands and complete-picker natural-rank preservation remain as described above. Public

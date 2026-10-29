@@ -271,8 +271,8 @@ describe("Desktop snapshot through authenticated model discovery", () => {
     const routed = catalog.models.filter(row => row.slug.startsWith("test/"));
     expect(routed.toSorted((a, b) => a.priority - b.priority).map(row => row.slug))
       .toEqual(["test/model-155", "test/model-123"]);
-    expect(routed.find(row => row.slug === "test/model-155")?.priority).toBe(0);
-    expect(routed.find(row => row.slug === "test/model-123")?.priority).toBe(1);
+    expect(routed.find(row => row.slug === "test/model-155")?.priority).toBe(1000);
+    expect(routed.find(row => row.slug === "test/model-123")?.priority).toBe(1001);
   });
 
   test("snapshot installs Desktop-safe aliases, legacy decoders, and ordinary discovery shapes", async () => {

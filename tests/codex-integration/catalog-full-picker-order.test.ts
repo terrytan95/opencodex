@@ -35,11 +35,10 @@ test("native-first picker order preserves Go subagent ranks and is repeatable", 
   expect(rows).toEqual(once);
 });
 
-test("routed-only orders move featured rows and place unlisted rows afterwards", () => {
-  const rows: any[] = [{ slug: "p/featured", priority: 0 }, { slug: "p/last", priority: 5 }, { slug: "gpt-5.5", priority: 9 }];
-  applyFullModelPickerOrder(rows, ["p/last", "p/featured"]);
-  expect(rows.toSorted((a, b) => a.priority - b.priority).map(row => row.slug)).toEqual(["p/last", "p/featured", "gpt-5.5"]);
-  expect(rows.map(row => row[SPAWN_PRIORITY_FIELD])).toEqual([0, 5, 9]);
+test("existing routed-only ordering retains its behavior", () => {
+  const rows: any[] = [{ slug: "opencode-go/glm-5.3", priority: 1000 }];
+  applyFullModelPickerOrder(rows, ["opencode-go/glm-5.3"]);
+  expect(rows).toEqual([{ slug: "opencode-go/glm-5.3", priority: 1000 }]);
 });
 
 test("full picker helper treats a null passthrough order as absent", () => {
@@ -353,19 +352,6 @@ describe("picker ordering through production catalog writers", () => {
   }
 
   for (const writer of ["convergence", "retained"] as const) {
-    test(`${writer} publishes routed-only order across featured rows and discovery outages`, async () => {
-      const next = config(slugs.slice(0, 5), [...slugs].reverse());
-      const natural = await writeCatalog(writer, config());
-      const healthy = await writeCatalog(writer, next);
-      next.providers["opencode-go"]!.liveModels = true;
-      next.providers["opencode-go"]!.models = [];
-      const retained = await writeCatalog(writer, next, true);
-      for (const rows of [healthy, retained]) {
-        expect(next.modelPickerOrder!.map(slug => rows.find(row => row.slug === slug)?.priority))
-          .toEqual(next.modelPickerOrder!.map((_, index) => index));
-        expect(roster(rows, next.subagentModels!)).toEqual(roster(natural, next.subagentModels!));
-      }
-    }, 30_000);
     const filteredOrder = ["gpt-5.5", slugs[5]!, ...slugs.slice(0, 5).reverse(), " gpt-5.5 "];
     const malformedOrders: Array<{ label: string; input: unknown; filtered: string[] }> = [
       { label: "string scalar", input: "gpt-5.5", filtered: [] },
