@@ -542,7 +542,6 @@ without that confirmation. Leaving the page or changing the provider connection 
 pending disable consent and aborts its request. A new batch waits until disable consent or
 the visibility write has settled, so an older response cannot hide the newer batch's action.
 
-
 ## Context capture
 
 Open **Usage → Context** and enable capture, then send a message in your client.
