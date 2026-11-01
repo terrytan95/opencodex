@@ -1,3 +1,4 @@
+import { CodexInstallationIdUnavailableError } from "../codex/installation-id";
 import { inspectContext } from "../usage/context-inspector";
 import { hasRoutingRules, routingHints } from "../routing/rules";
 /**
@@ -1033,13 +1034,15 @@ async function handleClaudeMessagesWithBudget(
           openAiSidecar?.releaseProbeLease?.();
           throw req.signal.reason ?? err;
         }
-        if (!(err instanceof errors.CodexPoolAuthenticationError) && !(err instanceof errors.CodexAuthContextError)
+        if (err instanceof CodexInstallationIdUnavailableError) {
+          // An unavailable optional helper cannot displace an independent native route.
+          nativeSelector.webSearchBackendAvailable = false;
+        } else if (!(err instanceof errors.CodexPoolAuthenticationError) && !(err instanceof errors.CodexAuthContextError)
           && !(err instanceof errors.CodexAccountCooldownError) && !(err instanceof errors.CodexThreadAffinityExpiredError)
           && !(err instanceof errors.CodexMainProfileDrainingError)) {
           openAiSidecar?.releaseProbeLease?.();
           throw err;
-        }
-        if (probeLease && candidates.some(candidate => candidate.accountMode === "pool")) nativeSelector.webSearchBackendAvailable = true;
+        } else if (probeLease && candidates.some(candidate => candidate.accountMode === "pool")) nativeSelector.webSearchBackendAvailable = true;
       } finally { probeLease?.release(); }
     }
     try {
