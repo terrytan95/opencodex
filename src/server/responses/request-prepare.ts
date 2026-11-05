@@ -1548,7 +1548,7 @@ export async function prepareResponsesRequest(
         413,
         "input_admission_refused",
         inputAdmissionRefusalMessage(inputAdmission, inboundSelector),
-      ));
+      ), "input");
     }
   }
   const preAuthHostKey = preAuthUpstreamHostCircuitKey(route, config);
