@@ -1,5 +1,14 @@
 import { uptimeCopy } from "./uptime-copy";
 import { desktopCompatibilityCopy } from "./desktop-compatibility-copy";
+import { shellV2Copy } from "./shell-v2-copy";
+import { modelsV2Copy } from "./v2-pages/models-copy";
+import { accountsV2Copy } from "./v2-pages/accounts-copy";
+import { subagentsV2Copy } from "./v2-pages/subagents-copy";
+import { usageV2Copy } from "./v2-pages/usage-copy";
+import { logsV2Copy } from "./v2-pages/logs-copy";
+import { connectV2Copy } from "./v2-pages/connect-copy";
+import { startupV2Copy } from "./v2-pages/startup-copy";
+import { proxyV2Copy } from "./v2-pages/proxy-copy";
 // Brazilian Portuguese — generated from en.ts. Must match TKey set (compile-checked).
 import type { TKey } from "./en";
 
@@ -160,6 +169,15 @@ export const pt: Record<TKey, string> = {
   "workflowBudget.saveFailed": "Não foi possível salvar os limites de fluxo de trabalho.",
   "workflowBudget.saved": "Limites de fluxo de trabalho salvos.",
   ...desktopCompatibilityCopy("pt"),
+  ...shellV2Copy("pt"),
+  ...modelsV2Copy("pt"),
+  ...accountsV2Copy("pt"),
+  ...subagentsV2Copy("pt"),
+  ...usageV2Copy("pt"),
+  ...logsV2Copy("pt"),
+  ...connectV2Copy("pt"),
+  ...startupV2Copy("pt"),
+  ...proxyV2Copy("pt"),
   "claude.tierDefaults.unset": "Não definido (manter configuração Claude)",
   "claude.tierDefaults.recovery": "Aplicação interrompida; restauração automática falhou. Verifique o backup abaixo antes de tentar novamente.",
   "claude.tierDefaults.title": "Modelos padrão da CLI",
@@ -387,6 +405,9 @@ export const pt: Record<TKey, string> = {
   "common.remove": "Remover",
   "common.loading": "Carregando…",
   "common.retry": "Tentar novamente",
+  "prov.affinityResetPending": "A alteração da conta foi salva, mas a atualização do roteamento das conversas não terminou. Tente novamente para concluir.",
+  "prov.affinityResetComplete": "O roteamento das conversas foi atualizado.",
+  "prov.affinityResetRetryUnavailable": "Não é possível tentar novamente com esta conta agora. Atualize a lista de contas e, se necessário, retome a conta ou entre novamente.",
   "common.undo": "Desfazer",
   "auth.adminTokenTitle": "Token de administrador do OpenCodex (OPENCODEX_ADMIN_AUTH_TOKEN)",
   "auth.adminAccountLabel": "Conta",
@@ -539,6 +560,11 @@ export const pt: Record<TKey, string> = {
   "startup.viable": "Pronto",
   "startup.unhealthy": "Instalado, mas com problemas",
   "startup.desktopLoginUnverified": "Em execução · Iniciar no login não verificado",
+  "startup.loginUnverifiedTitle": "Iniciar no login não verificado",
+  "startup.unverified": "Não verificado",
+  "startup.loginUnverifiedAction": "Confira Iniciar no login no menu do OpenCodex. No Linux sem bandeja, verifique ~/.config/autostart/OpenCodex.desktop.",
+  "startup.loginDisabled": "Em execução · Iniciar no login desativado",
+  "startup.desktopRunning": "O OpenCodex Desktop executa este proxy.",
   "startup.conflict": "Conflito de serviço",
   "startup.installedDisabled": "Instalado, mas desativado",
   "startup.shimActivationPending": "Instalado · ativação não confirmada",
@@ -2173,7 +2199,7 @@ export const pt: Record<TKey, string> = {
   "nav.codexAuth": "Autenticação do Codex",
   "nav.antigravity": "Antigravity",
   "nav.codexSet": "Codex",
-  "nav.connect": "Conexão",
+  "nav.connect": "Rota",
   "nav.usageLogs": "Uso e logs",
   "nav.sectionNavigation": "Páginas da seção",
   "codexSet.tab.multiauth": "Multiautenticação",
@@ -3529,7 +3555,7 @@ export const pt: Record<TKey, string> = {
   "cws.attention.catalogOmitted": "Ausente do catálogo de modelos — as capacidades dos membros estão incompletas ou incompatíveis (janela de contexto/metadados ausentes, ou interseção de modalidades vazia). O roteamento por alias continua funcionando",
   "cws.attention.allTargetsExhausted": "Todos os destinos habilitados estão sem cota",
   "cws.emptyTitle": "Crie seu primeiro combo",
-  "cws.empty.createDesc": "Dê nome a um modelo virtual e encadeie dois ou mais backends.",
+  "cws.empty.createDesc": "Adicione pelo menos um destino; use dois ou mais para failover.",
   "cws.backToAll": "Voltar para todos os combos",
   "cws.allCombos": "Todos os combos",
   "cws.copyModel": "Copiar id",
@@ -3898,6 +3924,7 @@ export const pt: Record<TKey, string> = {
   "models.aliasStale": "obsoleto",
   "connection.discovering": "Descobrindo destinos locais e compartilhados…",
   "connection.machineUnavailable": "O plano da máquina local está indisponível. As requisições compartilhadas não foram redirecionadas para o local.",
+  "connection.clientStateChanged": "A conexão Remote Link salva deste Child está ausente ou agora aponta para outro proprietário ou link e não corresponde mais ao Child em execução. Pare ou reinicie este Child e verifique a conexão antes de vinculá-lo novamente.",
   "connection.linkManaged": "Gerenciado pelo Home {home} via Remote Link ({linkId}). Este painel mostra as configurações e a cota do Home somente para leitura; faça as alterações no Home.",
   "connection.linkManagedUnnamed": "Gerenciado pelo seu Home via Remote Link ({linkId}). Este painel mostra as configurações e a cota do Home somente para leitura; faça as alterações no Home.",
   "connection.disconnect": "Desconectar do hub",

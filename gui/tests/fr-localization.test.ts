@@ -26,6 +26,7 @@ function carriesTranslatableWords(value: string): boolean {
 }
 
 const INTENTIONAL_ENGLISH = new Set<TKey>([
+  "usageV2.remoteLink", // Remote Link is the product name.
   "nav.antigravity", // Product name, like Codex and Claude.
   // These standalone French labels have the same spelling as English.
   "rules.action",

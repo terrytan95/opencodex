@@ -1,5 +1,14 @@
 import { uptimeCopy } from "./uptime-copy";
 import { desktopCompatibilityCopy } from "./desktop-compatibility-copy";
+import { shellV2Copy } from "./shell-v2-copy";
+import { modelsV2Copy } from "./v2-pages/models-copy";
+import { accountsV2Copy } from "./v2-pages/accounts-copy";
+import { subagentsV2Copy } from "./v2-pages/subagents-copy";
+import { usageV2Copy } from "./v2-pages/usage-copy";
+import { logsV2Copy } from "./v2-pages/logs-copy";
+import { connectV2Copy } from "./v2-pages/connect-copy";
+import { startupV2Copy } from "./v2-pages/startup-copy";
+import { proxyV2Copy } from "./v2-pages/proxy-copy";
 import type { TKey } from "./en";
 
 /**
@@ -158,6 +167,15 @@ export const ru: Record<TKey, string> = {
   "workflowBudget.saveFailed": "Не удалось сохранить лимиты рабочих процессов.",
   "workflowBudget.saved": "Лимиты рабочих процессов сохранены.",
   ...desktopCompatibilityCopy("ru"),
+  ...shellV2Copy("ru"),
+  ...modelsV2Copy("ru"),
+  ...accountsV2Copy("ru"),
+  ...subagentsV2Copy("ru"),
+  ...usageV2Copy("ru"),
+  ...logsV2Copy("ru"),
+  ...connectV2Copy("ru"),
+  ...startupV2Copy("ru"),
+  ...proxyV2Copy("ru"),
   "claude.tierDefaults.unset": "Не задано (сохранить настройку Claude)",
   "claude.tierDefaults.recovery": "Применение остановлено, автоматическое восстановление не удалось. Проверьте резервную копию ниже перед повтором.",
   "claude.tierDefaults.title": "Модели CLI по умолчанию",
@@ -432,6 +450,9 @@ export const ru: Record<TKey, string> = {
   "common.remove": "Удалить",
   "common.loading": "Загрузка…",
   "common.retry": "Повторить",
+  "prov.affinityResetPending": "Изменение аккаунта сохранено, но обновление маршрутизации разговоров не завершено. Повторите попытку.",
+  "prov.affinityResetComplete": "Маршрутизация разговоров обновлена.",
+  "prov.affinityResetRetryUnavailable": "Повторная попытка для этого аккаунта сейчас недоступна. Обновите список аккаунтов и при необходимости возобновите работу аккаунта или войдите снова.",
   "common.undo": "Отменить",
   "auth.adminTokenTitle": "Токен администратора OpenCodex (OPENCODEX_ADMIN_AUTH_TOKEN)",
   "auth.adminAccountLabel": "Учётная запись",
@@ -519,6 +540,11 @@ export const ru: Record<TKey, string> = {
   "startup.viable": "Готов",
   "startup.unhealthy": "Установлен, но неисправен",
   "startup.desktopLoginUnverified": "Работает · запуск при входе не подтверждён",
+  "startup.loginUnverifiedTitle": "Запуск при входе не подтверждён",
+  "startup.unverified": "Не подтверждено",
+  "startup.loginUnverifiedAction": "Проверьте запуск при входе в меню OpenCodex. В Linux без системного трея проверьте ~/.config/autostart/OpenCodex.desktop.",
+  "startup.loginDisabled": "Работает · запуск при входе выключен",
+  "startup.desktopRunning": "OpenCodex Desktop запускает этот прокси.",
   "startup.conflict": "Конфликт служб",
   "startup.installedDisabled": "Установлен, но отключён",
   "startup.shimActivationPending": "Установлен · активация не подтверждена",
@@ -2148,7 +2174,7 @@ export const ru: Record<TKey, string> = {
 "nav.codexAuth": "Аутентификация Codex",
   "nav.antigravity": "Antigravity",
   "nav.codexSet": "Codex",
-  "nav.connect": "Подключение",
+  "nav.connect": "Маршрут",
   "nav.usageLogs": "Использование и журналы",
   "nav.sectionNavigation": "Страницы раздела",
   "codexSet.tab.multiauth": "Мультиаутентификация",
@@ -3670,7 +3696,7 @@ export const ru: Record<TKey, string> = {
   "cws.attention.catalogOmitted": "Отсутствует в каталоге моделей — возможности участников неполны или несовместимы (нет context window / метаданных, или пустое пересечение modalities). Маршрутизация по alias всё ещё работает",
   "cws.attention.allTargetsExhausted": "Квота исчерпана у всех включённых целей",
   "cws.emptyTitle": "Создайте первое комбо",
-  "cws.empty.createDesc": "Задайте имя виртуальной модели и объедините в цепочку два и более бэкенда.",
+  "cws.empty.createDesc": "Добавьте хотя бы одну цель; для переключения при сбое используйте две или более.",
   "cws.backToAll": "Назад ко всем комбо",
   "cws.allCombos": "Все комбо",
   "cws.copyModel": "Копировать id",
@@ -3880,6 +3906,7 @@ export const ru: Record<TKey, string> = {
   "models.aliasStale": "устарел",
   "connection.discovering": "Discovering local and shared targets…",
   "connection.machineUnavailable": "The local machine plane is unavailable. Shared requests were not redirected locally.",
+  "connection.clientStateChanged": "Сохранённое подключение Remote Link этого Child отсутствует или теперь указывает на другого владельца или ссылку и больше не совпадает с запущенным Child. Остановите или перезапустите этот Child и проверьте подключение перед повторной привязкой.",
   "connection.linkManaged": "Управляется Home {home} через Remote Link ({linkId}). Эта панель показывает настройки и квоту Home только для чтения; вносите изменения на Home.",
   "connection.linkManagedUnnamed": "Управляется вашим Home через Remote Link ({linkId}). Эта панель показывает настройки и квоту Home только для чтения; вносите изменения на Home.",
   "connection.disconnect": "Disconnect from hub",
