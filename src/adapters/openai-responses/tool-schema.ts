@@ -12,6 +12,8 @@ import {
   XaiToolSchemaCompatibilityError,
 } from "../xai-tool-schema";
 import { isPlainObject } from "./internal";
+import { isImageGenClientName } from "./image-gen";
+import { isToolSearchWireName } from "../../responses/tool-search-compat";
 import { hasItemProvenance, isHistoricalItem } from "../../responses/item-provenance";
 
 function normalizeFunctionToolSchema(tool: unknown, xaiTarget: boolean, chatDefaults: boolean): unknown | undefined {
@@ -271,15 +273,24 @@ export function stripUnsupportedHostedTools(
   // non-lookup work in this filter. The client-tool scan runs only for a provider that
   // declared a conditional denial, so every other provider skips it.
   const conditional = provider.unsupportedHostedToolsWithClientTools;
-  const declaredUnsupported = declaredUnsupportedHostedTools(
-    provider,
-    Array.isArray(conditional) && conditional.length > 0 && responsesBodyDeclaresClientTools(body),
-  );
+  const unconditional = declaredUnsupportedHostedTools(provider);
+  const declaredUnsupported = Array.isArray(conditional) && conditional.length > 0 && responsesBodyDeclaresClientTools(body)
+    ? declaredUnsupportedHostedTools(provider, true)
+    : unconditional;
+  const denyToolSearch = unconditional.has("tool_search");
+  const denyImageGen = unconditional.has("image_generation");
+  const isUnsupported = (tool: unknown): boolean => {
+    if (!isPlainObject(tool) || typeof tool.type !== "string") return false;
+    if (isHostedToolUnsupportedForModel(model, tool.type, provider.baseUrl, declaredUnsupported)) return true;
+    if (typeof tool.name !== "string") return false;
+    if (tool.type === "function") {
+      return (denyToolSearch && isToolSearchWireName(tool.name))
+        || (denyImageGen && isImageGenClientName(tool.name));
+    }
+    return denyImageGen && tool.type === "namespace" && tool.name === "image_gen";
+  };
   const filterTools = (tools: unknown[]): unknown[] => {
-    const filtered = tools.filter(t => {
-      const type = isPlainObject(t) && typeof t.type === "string" ? t.type : undefined;
-      return !type || !isHostedToolUnsupportedForModel(model, type, provider.baseUrl, declaredUnsupported);
-    });
+    const filtered = tools.filter(tool => !isUnsupported(tool));
     return filtered.length === tools.length ? tools : filtered;
   };
 
@@ -314,11 +325,7 @@ export function stripUnsupportedHostedTools(
       next = { ...next, tool_choice: tools.length > 0 ? { ...toolChoice, tools } : "none" };
       changed = true;
     }
-  } else if (
-    isPlainObject(toolChoice)
-    && typeof toolChoice.type === "string"
-    && isHostedToolUnsupportedForModel(model, toolChoice.type, provider.baseUrl, declaredUnsupported)
-  ) {
+  } else if (isUnsupported(toolChoice)) {
     next = { ...next, tool_choice: "none" };
     changed = true;
   } else if (changed && toolChoice === "required") {

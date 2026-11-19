@@ -78,6 +78,47 @@ describe("a declared hosted-tool denial reaches the serialized request", () => {
     expect(body.tools).toEqual([functionTool]);
   });
 
+  for (const deny of [true, false]) {
+    test(`filters Codex tool aliases only with the provider denial (${deny})`, () => {
+      const shell = { ...functionTool, name: "exec_command" };
+      const patch = { type: "custom", name: "apply_patch", description: "Apply a patch", format: { type: "text" } };
+      const search = { type: "tool_search", execution: "client" };
+      const wrappedSearch = { ...functionTool, name: "tool_search" };
+      const image = {
+        type: "namespace", name: "image_gen", description: "Image tools",
+        tools: [{ ...functionTool, name: "text2im" }],
+      };
+      const provider = gateway({
+        supportsResponsesCustomTools: false,
+        ...(deny ? { unsupportedHostedTools: ["web_search", "tool_search", "image_generation"] } : {}),
+      });
+      const names = (body: Record<string, unknown>) =>
+        (body.tools as { type: string; name?: string }[]).map(tool => [tool.type, tool.name]);
+      const body = build({
+        tools: [shell, patch, search, wrappedSearch, { type: "web_search" }, image],
+        tool_choice: { type: "allowed_tools", mode: "auto", tools: [
+          { type: "function", name: "exec_command" },
+          { type: "tool_search" },
+          { type: "function", name: "image_gen.text2im" },
+        ] },
+      }, provider);
+
+      const kept = [["function", "exec_command"], ["function", "apply_patch"]];
+      expect(names(body)).toEqual(deny ? kept : [...kept,
+        ["function", "opencodex_tool_search"], ["function", "tool_search"],
+        ["web_search", undefined], ["function", "image_gen__text2im"],
+      ]);
+      if (deny) {
+        expect(body.tool_choice).toEqual({
+          type: "allowed_tools", mode: "auto", tools: [{ type: "function", name: "exec_command" }],
+        });
+        expect(build({ tools: [search], tool_choice: { type: "tool_search" } }, provider).tool_choice).toBe("none");
+        const forcedImage = { ...functionTool, name: "image_gen__text2im" };
+        expect(build({ tools: [forcedImage], tool_choice: { type: "function", name: forcedImage.name } }, provider).tool_choice).toBe("none");
+      }
+    });
+  }
+
   test("an undeclared gateway still forwards hosted web_search", () => {
     // The declaration is the only thing that changes behaviour here: without it this
     // destination is an unclassified gateway and the hosted tool must pass through, or the
@@ -125,6 +166,14 @@ describe("provider-declared unsupported hosted tools", () => {
     expect(strip({
       input: [{ type: "additional_tools", tools: [{ type: "web_search" }, functionTool] }],
     }, ["web_search"]).input).toEqual([{ type: "additional_tools", tools: [functionTool] }]);
+  });
+
+  test("the declaration filters lowered search and image tools from additional_tools", () => {
+    const searchAlias = { ...functionTool, name: "opencodex_tool_search_2" };
+    const imageAlias = { ...functionTool, name: "image_gen__text2im" };
+    expect(strip({
+      input: [{ type: "additional_tools", tools: [searchAlias, imageAlias, functionTool] }],
+    }, ["tool_search", "image_gen"]).input).toEqual([{ type: "additional_tools", tools: [functionTool] }]);
   });
 
   test("the declaration denies only what it names", () => {

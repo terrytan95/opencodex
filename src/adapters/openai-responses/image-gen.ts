@@ -20,7 +20,7 @@ function imageGenWireName(name: string): string {
 }
 
 /** Match client image-gen declarations across namespace, legacy dotted, and canonical wire forms. */
-function isImageGenClientName(name: string): boolean {
+export function isImageGenClientName(name: string): boolean {
   return name === IMAGE_GEN_NAMESPACE
     || name.startsWith(IMAGE_GEN_DOTTED_PREFIX)
     || name.startsWith(IMAGE_GEN_WIRE_PREFIX);

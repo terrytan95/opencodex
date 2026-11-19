@@ -7,7 +7,7 @@ A gateway that speaks the Responses API does not necessarily accept everything O
 `unsupportedHostedTools` is how such a destination says so: it names the hosted tool declarations
 this provider rejects, and `stripUnsupportedHostedTools` in
 `src/adapters/openai-responses/tool-schema.ts` removes them from `tools`, from client-loaded
-`additional_tools`, and from `tool_choice` before the body is serialized.
+`additional_tools`, and from `tool_choice` before the body is serialized. Unconditional `tool_search` and `image_generation` denials also remove their reserved Codex function aliases after lowering. Completed call history can still be replayed.
 
 The capability is provider-declared rather than destination-matched, and that is the point. The
 original mechanism in `src/responses/hosted-tool-policy.ts` was a table of `(model, baseUrl)`

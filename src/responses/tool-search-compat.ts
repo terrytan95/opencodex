@@ -2,6 +2,12 @@ export const TOOL_SEARCH_FUNCTION_NAME = "tool_search";
 export const TOOL_SEARCH_DEFAULT_DESCRIPTION = "Search for additional tools to load for the next turn.";
 const TOOL_SEARCH_WIRE_ALIAS_PREFIX = "opencodex_tool_search";
 
+export function isToolSearchWireName(name: string): boolean {
+  if (name === TOOL_SEARCH_FUNCTION_NAME || name === TOOL_SEARCH_WIRE_ALIAS_PREFIX) return true;
+  return name.startsWith(`${TOOL_SEARCH_WIRE_ALIAS_PREFIX}_`)
+    && /^(?:[2-9]|[1-9][0-9]+)$/.test(name.slice(TOOL_SEARCH_WIRE_ALIAS_PREFIX.length + 1));
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
