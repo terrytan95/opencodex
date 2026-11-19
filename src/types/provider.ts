@@ -430,6 +430,8 @@ export interface OcxProviderConfig {
   statelessResponses?: boolean;
   /** False omits the Codex-only output.encrypted_content include on this Responses provider. */
   supportsResponsesOutputEncryptedContent?: boolean;
+  /** Reduce the generated Codex skill directory to names and paths on this Responses route. */
+  compactCodexSkillCatalog?: boolean;
   /**
    * Responses upstream whose parser requires an unambiguous call batch and its matched
    * result batch to remain contiguous. Hook-injected context that splits the batch is

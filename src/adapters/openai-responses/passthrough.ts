@@ -40,7 +40,7 @@ import {
   emittedFastWire,
 } from "../../providers/fastwire";
 import { dropResponsesReasoningInputItems, mapRoutedResponsesReasoningEffort, normalizeConfiguredReasoningSummaryDelivery, sanitizeReasoningInputContent, stripDisabledReasoningSummaries, stripDisabledVerbosity, stripInternalReasoningEnabled, stripNoneReasoningSummary, stripUnsupportedReasoningSummaryDelivery } from "./reasoning";
-import { repairUrlCitationAnnotations, scrubOcxCompactionItems, stripUnsupportedOutputInclude, stripArkKimiOrphanCipher, stripCanonicalOnlyInputItems, stripCanonicalOnlyToolFields, stripCanonicalOnlyTopLevelFields, stripInternalChatMessageMetadataPassthrough, stripInvalidItemIds, stripItemIdsWhenUnstored, stripProviderInputItemMetadata, stripRejectedSamplingParams } from "./request-strips";
+import { compactCodexSkillCatalog, repairUrlCitationAnnotations, scrubOcxCompactionItems, stripUnsupportedOutputInclude, stripArkKimiOrphanCipher, stripCanonicalOnlyInputItems, stripCanonicalOnlyToolFields, stripCanonicalOnlyTopLevelFields, stripInternalChatMessageMetadataPassthrough, stripInvalidItemIds, stripItemIdsWhenUnstored, stripProviderInputItemMetadata, stripRejectedSamplingParams } from "./request-strips";
 import { notePlaintextReasoningDropped } from "./plaintext-reasoning-notice";
 import { stripCanonicalForwardPromptCacheOptions, stripDeprecatedPromptCacheRetention } from "./prompt-cache";
 import { isPlainObject } from "./internal";
@@ -212,6 +212,7 @@ export function createResponsesPassthroughAdapter(provider: OcxProviderConfig): 
         forward ? stripRoutedIdentity : (text: string) => nameRoutedIdentity(text, parsed.modelId),
       );
       outBody = mapRoutedResponsesReasoningEffort(outBody, provider, parsed.modelId);
+      if (!forward && provider.compactCodexSkillCatalog === true) outBody = compactCodexSkillCatalog(outBody);
       // stripPreviousResponseId() intentionally returns its input on a no-op. Detach before the
       // tier write so a force-fast/default decision can never mutate parsed._rawBody.
       outBody = applyTierDecisionToResponsesBody(outBody, parsed.options?.tierDecision);

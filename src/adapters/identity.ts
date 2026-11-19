@@ -205,8 +205,12 @@ function isEmptyTextPart(part: unknown): boolean {
   return typeof record.text === "string" && record.text.length === 0;
 }
 
+export function repairIdentityInResponsesBody(body: unknown, repair: (text: string) => string): unknown {
+  return mapResponsesInstructionText(body, text => hasRoutedIdentity(text) ? repair(text) : text);
+}
+
 /**
- * Apply `repair` to the instruction text of a Responses request body: the top-level `instructions`
+ * Transform the instruction text of a Responses request body: the top-level `instructions`
  * string and every developer/system `input` message. Nothing else is in reach — user turns, tool
  * output and assistant history are the caller's content.
  *
@@ -214,13 +218,12 @@ function isEmptyTextPart(part: unknown): boolean {
  * `instructions` string is a different payload from an absent key, and an empty developer message is
  * a message the caller never wrote, so both are removed instead of sent blank.
  */
-export function repairIdentityInResponsesBody(body: unknown, repair: (text: string) => string): unknown {
+export function mapResponsesInstructionText(body: unknown, transform: (text: string) => string): unknown {
   if (!body || typeof body !== "object" || Array.isArray(body)) return body;
   const record = body as Record<string, unknown>;
   let changed = false;
   const mapText = (text: string): string => {
-    if (!hasRoutedIdentity(text)) return text;
-    const next = repair(text);
+    const next = transform(text);
     if (next !== text) changed = true;
     return next;
   };

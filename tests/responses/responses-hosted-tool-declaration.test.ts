@@ -128,6 +128,36 @@ describe("a declared hosted-tool denial reaches the serialized request", () => {
     expect(build(raw, gateway({ baseUrl: provider.baseUrl })).include).toEqual(raw.include);
   });
 
+  test("only an opted-in route compacts the generated skills directory", () => {
+    const directory = [
+      "<skills_instructions>",
+      "Read the skill before use.",
+      "### Available skills",
+      "- plugin:example: Full skill description. (file: r0/example/SKILL.md)",
+      "### Scope",
+      "- sample: Keep this instruction. (file: r0/sample/SKILL.md)",
+      "</skills_instructions>",
+    ].join("\n");
+    const instructions = "Keep this instruction.\n" + directory + "\nAnd this instruction.";
+    const input = [
+      { type: "message", role: "developer", content: [{ type: "input_text", text: directory }] },
+      { type: "message", role: "user", content: [{ type: "input_text", text: directory }] },
+    ];
+    const raw = { instructions, input };
+    const compact = directory.replace(
+      "- plugin:example: Full skill description. (file: r0/example/SKILL.md)",
+      "Read the referenced skill file before using a listed skill.\n- plugin:example (file: r0/example/SKILL.md)",
+    );
+    const body = build(raw, gateway({ compactCodexSkillCatalog: true }));
+    expect(body.instructions).toBe(instructions.replace(directory, compact));
+    expect(body.input).toEqual([
+      { type: "message", role: "developer", content: [{ type: "input_text", text: compact }] },
+      input[1],
+    ]);
+    expect(build(raw, gateway())).toMatchObject(raw);
+    expect(input[0]?.content[0]?.text).toBe(directory);
+  });
+
   test("an undeclared gateway still forwards hosted web_search", () => {
     // The declaration is the only thing that changes behaviour here: without it this
     // destination is an unclassified gateway and the hosted tool must pass through, or the

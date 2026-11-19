@@ -1215,6 +1215,7 @@ const PROVIDER_CONFIG_FIELD_POLICY = {
   commandCodeVersion: "editor",
   statelessResponses: "editor",
   supportsResponsesOutputEncryptedContent: "editor",
+  compactCodexSkillCatalog: "editor",
   requiresAdjacentResponsesToolResults: "editor",
   requiresPairedResponsesToolResults: "editor",
   annotateEmptyToolOutputs: "editor",

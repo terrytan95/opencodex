@@ -6,6 +6,26 @@ import { modelInList } from "../../types";
 import { isPlainObject } from "./internal";
 import { activateDeferredTool } from "./tool-schema";
 import { stripOpenAiOnlyWebSearchFields } from "./web-search";
+import { mapResponsesInstructionText } from "../identity";
+
+export function compactCodexSkillCatalog(body: unknown): unknown {
+  // Gemini App2API flattens Codex instructions into the Gemini App prompt, where full skill descriptions can stall completion.
+  return mapResponsesInstructionText(body, text => text.replace(
+    /^<skills_instructions>\r?\n[\s\S]*?^<\/skills_instructions>\r?$/gm,
+    block => {
+      const heading = /^### Available skills(\r?\n)/m.exec(block);
+      if (!heading) return block;
+      const start = heading.index + heading[0].length;
+      const rest = block.slice(start);
+      const nextHeading = /^#{1,3} |^<\/skills_instructions>/m.exec(rest);
+      const catalog = rest.slice(0, nextHeading?.index ?? rest.length);
+      const compact = catalog.replace(/^- (\S+?): [^\r\n]+? \(file: ([^\r\n]+)\)(\r?)$/gm, "- $1 (file: $2)$3");
+      if (compact === catalog) return block;
+      return block.slice(0, start) + "Read the referenced skill file before using a listed skill." + heading[1]
+        + compact + rest.slice(catalog.length);
+    },
+  ));
+}
 
 /**
  * Codex requests output.encrypted_content, which xAI, Meta, Azure and Kimi Code reject with HTTP 400.

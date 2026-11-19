@@ -27,6 +27,7 @@ export const PROVIDER_MODEL_RENAME_ROLES = {
   commandCodeVersion: "none",
   statelessResponses: "none",
   supportsResponsesOutputEncryptedContent: "none",
+  compactCodexSkillCatalog: "none",
   requiresAdjacentResponsesToolResults: "none",
   requiresPairedResponsesToolResults: "none",
   annotateEmptyToolOutputs: "none",
