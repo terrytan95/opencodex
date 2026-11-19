@@ -608,8 +608,7 @@ test("non-streaming /v1/chat/completions returns chat.completion JSON", async ()
     });
     expect(response.status).toBe(200);
     const json = await response.json() as {
-      object: string;
-      model: string;
+      object: string; model: string;
       choices: Array<{ message: { role: string; content: string | null }; finish_reason: string }>;
     };
     expect(contextSnapshot().sessions).toHaveLength(1);

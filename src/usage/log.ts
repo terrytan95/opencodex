@@ -10,6 +10,8 @@ import { enforceAppOwnedMemoryBudget } from "../lib/app-owned-memory";
 import { recordOwnedConfigPath } from "../lib/config-ownership";
 import { sanitizeLogMetadataString } from "../lib/redact";
 import { usageDisplayTotalTokens } from "./totals";
+import type { CacheTelemetryProvenance } from "./cache-provenance";
+import { linkLogField, type LinkRequestLogCarrier } from "./link-log-fields";
 import { normalizeRecordedClient, type UsageClient } from "./client";
 import {
   normalizePersistedJevDecision,
@@ -22,9 +24,10 @@ import {
   type RequestCloseReason,
   type RequestTerminalStatus,
 } from "./request-outcome";
-import type { AttemptTierOutcome, OcxUsage } from "../types";
+import type { AttemptTierOutcome, CacheAffinityLogReason, CacheAffinityOutcome, OcxUsage } from "../types";
 import { normalizeRouteDecisionTrace, type RouteDecisionTraceV1 } from "../routing/trace";
 import { parseProtocolTraceV1, type ProtocolTraceV1 } from "../protocols/dto";
+import { requestBodyField, type RequestBodyFacts } from "./request-body";
 import { ACCOUNT_LOG_LABEL_RE, CODEX_ACCOUNT_LOG_LABEL_RE } from "../codex/account-label";
 import { claudeCompatibilityReason, normalizeClaudeFeatureCodes, type ClaudeFeatureCode } from "../claude/compatibility";
 import type { UpstreamCondition } from "../lib/upstream-condition";
@@ -94,19 +97,15 @@ export function isCodexPoolAccountLogLabel(value: unknown): value is "main" | `p
   return value === "main" || (typeof value === "string" && CODEX_ACCOUNT_LOG_LABEL_RE.test(value));
 }
 
+/** Anthropic pool account tag (#8383): exactly the `p<hex6>` label of its logged provider, nothing else. */
+export function isAnthropicAccountTag(value: unknown): value is `p${string}` {
+  return typeof value === "string" && CODEX_ACCOUNT_LOG_LABEL_RE.test(value);
+}
+
 /** Request-time upstream credential class, never a credential or account identifier. */
 export type UsageCredentialSource = "grok-oauth" | "xai-api-key";
 
-/**
- * Where a row's cache-token detail came from.
- *
- * Strict-client normalization emits zero-default token-detail objects on every bridged wire
- * (`responsesUsage` in src/bridge.ts), so a `cached_tokens: 0` read back off that wire is a
- * wire-compatibility artifact and not a measured cache miss. The three values stay distinct all
- * the way to the summary because folding `synthesized` or `unknown` into `observed` is what
- * lets a pool that discarded every warm prefix still report a plausible cache hit rate (#4546).
- */
-export type CacheTelemetryProvenance = "observed" | "synthesized" | "unknown";
+export { classifyCacheTelemetryProvenance, type CacheTelemetryProvenance } from "./cache-provenance";
 
 const KNOWN_CACHE_PROVENANCE = new Set<CacheTelemetryProvenance>([
   "observed", "synthesized", "unknown",
@@ -114,27 +113,6 @@ const KNOWN_CACHE_PROVENANCE = new Set<CacheTelemetryProvenance>([
 
 export function isKnownCacheTelemetryProvenance(value: unknown): value is CacheTelemetryProvenance {
   return typeof value === "string" && KNOWN_CACHE_PROVENANCE.has(value as CacheTelemetryProvenance);
-}
-
-/**
- * Classify one usage record's cache detail.
- *
- * `wireParsed` means the counts were read back off a response wire rather than reported raw by
- * the adapter. An all-zero cache detail from that source cannot be told apart from the zero
- * defaults the normalizer writes, so it is `synthesized`; the same shape reported raw is a real
- * zero and stays `observed`. A record with no cache fields at all is `unknown`, which is not a
- * zero either.
- */
-export function classifyCacheTelemetryProvenance(
-  usage: OcxUsage | undefined,
-  options: { wireParsed?: boolean } = {},
-): CacheTelemetryProvenance {
-  if (!usage) return "unknown";
-  const present = [usage.cachedInputTokens, usage.cacheReadInputTokens, usage.cacheCreationInputTokens]
-    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-  if (present.length === 0) return "unknown";
-  if (present.some(value => value > 0)) return "observed";
-  return options.wireParsed === true ? "synthesized" : "observed";
 }
 
 export interface PersistedUsageAttempt {
@@ -171,6 +149,8 @@ export interface PersistedUsageAttempt {
   locallyAnswered?: boolean;
   /** Stable non-PII identity for the Codex pool account that served this attempt. */
   accountLogLabel?: CodexUsageAccountLogLabel;
+  /** Anthropic pool account that served this attempt: the p-label of its provider (#8383). */
+  accountTag?: `p${string}`;
   inputTokenEstimate?: number;
   usage?: OcxUsage;
   totalTokens?: number;
@@ -302,7 +282,7 @@ export function normalizeRequestSpend(value: unknown): PersistedRequestSpend | u
   };
 }
 
-export interface PersistedUsageEntry {
+export interface PersistedUsageEntry extends LinkRequestLogCarrier {
   requestedAlias?: string;
   requestId: string;
   /** Best-effort classified client; absent only for records predating attribution. */
@@ -325,6 +305,8 @@ export interface PersistedUsageEntry {
   inboundProtocol?: "responses" | "chat" | "messages";
   /** Stable non-PII identity for Codex Pool usage; absent for Direct/non-Codex traffic. */
   accountLogLabel?: CodexUsageAccountLogLabel;
+  /** Anthropic pool account of the row's provider (#8383); never read by account summaries. */
+  accountTag?: `p${string}`;
   /** Best-effort chat/session correlation for Logs grouping (#330). */
   conversationId?: string;
   resolvedModel?: string;
@@ -400,6 +382,9 @@ export interface PersistedUsageEntry {
    */
   affinity?: CodexAffinityMove;
   affinityReason?: CodexAffinityReason;
+  /** Provider cache-affinity outcome for key-pool routes; additive, older rows omit it. */
+  cacheAffinity?: CacheAffinityOutcome;
+  cacheAffinityReason?: CacheAffinityLogReason;
   /**
    * Set when this request dropped account-bound continuation after a Codex pool
    * account change. Never an account identifier.
@@ -420,6 +405,8 @@ export interface PersistedUsageEntry {
    * rows and rows that fail validation carry none, and are never back-filled by guessing.
    */
   protocolTrace?: ProtocolTraceV1;
+  /** The request body as received (#3023): wire bytes, Content-Encoding, decoded bytes. Absent on older rows. */
+  requestBody?: RequestBodyFacts;
   /**
    * How far this request got and why it failed (#2366). Projected from the attempt that ended
    * the request so every surface reads the answer off the same row. Absent on a completed
@@ -543,6 +530,21 @@ export function isKnownAffinityReason(value: unknown): value is NonNullable<Pers
   return typeof value === "string" && KNOWN_AFFINITY_REASONS.has(value as NonNullable<PersistedUsageEntry["affinityReason"]>);
 }
 
+const KNOWN_CACHE_AFFINITY = new Set<NonNullable<PersistedUsageEntry["cacheAffinity"]>>([
+  "kept", "bound", "released",
+]);
+const KNOWN_CACHE_AFFINITY_REASONS = new Set<NonNullable<PersistedUsageEntry["cacheAffinityReason"]>>([
+  "cache", "session", "turn", "continuation", "new", "quota", "auth",
+]);
+
+export function isKnownCacheAffinity(value: unknown): value is NonNullable<PersistedUsageEntry["cacheAffinity"]> {
+  return typeof value === "string" && KNOWN_CACHE_AFFINITY.has(value as NonNullable<PersistedUsageEntry["cacheAffinity"]>);
+}
+
+export function isKnownCacheAffinityReason(value: unknown): value is NonNullable<PersistedUsageEntry["cacheAffinityReason"]> {
+  return typeof value === "string" && KNOWN_CACHE_AFFINITY_REASONS.has(value as NonNullable<PersistedUsageEntry["cacheAffinityReason"]>);
+}
+
 export function usageLogPath(configDir?: string): string {
   return join(configDir ?? getConfigDir(), "usage.jsonl");
 }
@@ -608,7 +610,9 @@ function normalizeUsageValue(usage: OcxUsage | undefined): OcxUsage | undefined 
     ...(typeof usage.cacheCreationInputTokens === "number" ? { cacheCreationInputTokens: usage.cacheCreationInputTokens } : {}),
     ...(typeof usage.cacheCreation1hInputTokens === "number" ? { cacheCreation1hInputTokens: usage.cacheCreation1hInputTokens } : {}),
     ...(typeof usage.reasoningOutputTokens === "number" ? { reasoningOutputTokens: usage.reasoningOutputTokens } : {}),
-    ...(isNonNegativeFiniteNumber(usage.providerCredits) ? { providerCredits: usage.providerCredits } : {}),
+    // Persist invalid readings as a JSON-safe negative sentinel, so they cannot become
+    // indistinguishable from a missing reading after serialization.
+    ...(usage.providerCredits !== undefined ? { providerCredits: isNonNegativeFiniteNumber(usage.providerCredits) ? usage.providerCredits : -1 } : {}),
     ...(usage.estimated ? { estimated: true } : {}),
   };
 }
@@ -653,7 +657,6 @@ function normalizeAttemptUsage(raw: unknown): OcxUsage | null {
     "cacheCreationInputTokens",
     "cacheCreation1hInputTokens",
     "reasoningOutputTokens",
-    "providerCredits",
   ] as const) {
     if (key in usage && !isNonNegativeFiniteNumber(usage[key])) return null;
   }
@@ -792,6 +795,7 @@ function normalizeUsageAttempt(raw: unknown): PersistedUsageAttempt | null {
     ...(isCodexUsageAccountLogLabel(attempt.accountLogLabel)
       ? { accountLogLabel: attempt.accountLogLabel }
       : {}),
+    ...(isAnthropicAccountTag(attempt.accountTag) ? { accountTag: attempt.accountTag } : {}),
     ...(isNonNegativeFiniteNumber(attempt.inputTokenEstimate)
       ? { inputTokenEstimate: attempt.inputTokenEstimate }
       : {}),
@@ -1026,6 +1030,10 @@ function normalizeUsageEntry(entry: PersistedUsageEntry): PersistedUsageEntry {
   const affinityReason = affinity !== undefined && isKnownAffinityReason(entry.affinityReason)
     ? entry.affinityReason
     : undefined;
+  const cacheAffinity = isKnownCacheAffinity(entry.cacheAffinity) ? entry.cacheAffinity : undefined;
+  const cacheAffinityReason = cacheAffinity !== undefined && isKnownCacheAffinityReason(entry.cacheAffinityReason)
+    ? entry.cacheAffinityReason
+    : undefined;
   const conversationStateScrub = typeof entry.conversationStateScrub === "string"
     && KNOWN_CONVERSATION_STATE_SCRUBS.has(entry.conversationStateScrub)
     ? entry.conversationStateScrub
@@ -1053,9 +1061,11 @@ function normalizeUsageEntry(entry: PersistedUsageEntry): PersistedUsageEntry {
       : {}),
     ...(isKnownAdmissionKind(entry.admissionKind) ? { admissionKind: entry.admissionKind } : {}),
     ...(isKnownInboundProtocol(entry.inboundProtocol) ? { inboundProtocol: entry.inboundProtocol } : {}),
+    ...linkLogField(entry.link),
     ...(isCodexUsageAccountLogLabel(entry.accountLogLabel)
       ? { accountLogLabel: entry.accountLogLabel }
       : {}),
+    ...(isAnthropicAccountTag(entry.accountTag) ? { accountTag: entry.accountTag } : {}),
     ...(typeof entry.conversationId === "string" && entry.conversationId.trim()
       ? { conversationId: entry.conversationId.trim().slice(0, 128) }
       : {}),
@@ -1122,6 +1132,8 @@ function normalizeUsageEntry(entry: PersistedUsageEntry): PersistedUsageEntry {
     ...(terminalSource ? { terminalSource } : {}),
     ...(affinity ? { affinity } : {}),
     ...(affinityReason ? { affinityReason } : {}),
+    ...(cacheAffinity ? { cacheAffinity } : {}),
+    ...(cacheAffinityReason ? { cacheAffinityReason } : {}),
     ...(conversationStateScrub ? { conversationStateScrub } : {}),
     // Closed code, classified condition and numeric reset only; upstream text is never kept.
     ...errorDetailFor(entry),
@@ -1134,6 +1146,7 @@ function normalizeUsageEntry(entry: PersistedUsageEntry): PersistedUsageEntry {
     ...(jevDecision ? { jevDecision } : {}),
     ...(claudeCompatibility ? { claudeCompatibility } : {}),
     ...(protocolTrace ? { protocolTrace } : {}),
+    ...requestBodyField(entry.requestBody),
     ...normalizeRequestFailureAttribution(entry),
   };
   if (normalized.attemptNormalizationDropped !== true && (entry.attemptNormalizationDropped === true
@@ -1449,17 +1462,27 @@ function usageLogRevision(path: string, fd: number, stat: ReturnType<typeof fsta
   };
 }
 
-export function usageLogRevisionKey(revision: UsageLogRevision | null): string {
+/**
+ * ChangeTime is part of the key on POSIX only. On NTFS the config home's background icacls
+ * harden re-applies inherited ACEs to usage.jsonl and moves its ChangeTime with every other
+ * field unchanged, and content cannot change without moving mtime; counting it rebuilt the
+ * filter index and every retained aggregate. On POSIX it still exposes an mtime-restoring rewrite.
+ */
+export function usageLogRevisionKey(
+  revision: UsageLogRevision | null,
+  platform: NodeJS.Platform = process.platform,
+): string {
   if (!revision) return "missing";
-  return [
+  const parts: Array<string | number> = [
     revision.path,
     revision.dev,
     revision.ino,
     revision.birthtimeMs,
     revision.size,
     revision.mtimeMs,
-    revision.ctimeMs,
-  ].join("\0");
+  ];
+  if (platform !== "win32") parts.push(revision.ctimeMs);
+  return parts.join("\0");
 }
 
 /** Identity of the usage ledger file, excluding size/mtime/ctime so appends can share work. */

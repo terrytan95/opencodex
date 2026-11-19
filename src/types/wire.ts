@@ -25,6 +25,16 @@ export const REASONING_SUMMARY_DELIVERY_VALUES = [
 
 export type ReasoningSummaryDelivery = typeof REASONING_SUMMARY_DELIVERY_VALUES[number];
 
+/**
+ * Anthropic adaptive `thinking.display` policy (#8363). `auto` is the built-in behavior:
+ * native Opus 5.5 progress updates, summarized thinking elsewhere unless the caller hides it.
+ * `updates` is only sendable to native Opus 5.5 and degrades to `auto` for every other model.
+ * `omitted` sends adaptive thinking with no display field, matching hidden thinking.
+ */
+export const THINKING_DISPLAY_VALUES = ["auto", "summarized", "updates", "omitted"] as const;
+
+export type ThinkingDisplayPolicy = (typeof THINKING_DISPLAY_VALUES)[number];
+
 /** Trusted runtime ownership for Codex-account credentials. Never persisted per provider. */
 export type CodexAccountMode = "direct" | "pool";
 
@@ -103,6 +113,7 @@ function normalizedEndpoint(value: unknown): string | undefined {
 const CREDENTIAL_PINNED_ADAPTERS: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze({
   "workbuddy-ai": Object.freeze({ "": "workbuddy-ai" }),
   "dsh-account": Object.freeze({ "": "dsh-account" }),
+  "m365-copilot": Object.freeze({ "": "m365-copilot" }),
 });
 
 function prefixPinsFor(providerName: string, provider: WirePinProvider | undefined): Readonly<Record<string, string>> | undefined {

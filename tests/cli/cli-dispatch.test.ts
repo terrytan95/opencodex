@@ -30,7 +30,6 @@ import { getConfigDir } from "../../src/config";
 import { getAccountSet, removeCredential, saveCredential } from "../../src/oauth/store";
 import { removeTreeWithRetry } from "../helpers/remove-tree";
 import { repoPath } from "../helpers/repo-root";
-import type { OcxConfig } from "../../src/types";
 
 /** Minimal fake deps. dispatchCommand only touches deps for real command
  * runners, which these tests never invoke, so an empty object is enough. */
@@ -176,10 +175,11 @@ describe("dispatchCommand exit codes", () => {
     }
   });
 
-  test("sync refreshes already-owned OpenCode and Kilo after publishing the Codex catalog", async () => {
+  test("sync refreshes already-owned OpenCode, Kilo and DSH after publishing the Codex catalog", async () => {
     const syncModule = await import("../../src/codex/sync");
     const catalogModule = await import("../../src/integrations/catalog-refresh");
     const asideModule = await import("../../src/cli/aside-profiles");
+    const piSyncModule = await import("../../src/cli/pi-sync");
     const order: string[] = [];
     const sync = spyOn(syncModule, "syncModelsToCodex").mockImplementation(async () => {
       order.push("catalog");
@@ -191,6 +191,7 @@ describe("dispatchCommand exit codes", () => {
       return [];
     });
     const aside = spyOn(asideModule, "refreshAsideProfilesThroughServer").mockResolvedValue([]);
+    const pi = spyOn(piSyncModule, "refreshPiThroughServer").mockResolvedValue([]);
     const log = spyOn(console, "log").mockImplementation(() => {});
     try {
       const args = ["sync"];
@@ -201,9 +202,11 @@ describe("dispatchCommand exit codes", () => {
       expect(code).toBe(0);
       expect(order).toEqual(["catalog", "refresh"]);
       expect(refresh).toHaveBeenCalledTimes(1);
-      expect(refresh.mock.calls[0]![1]).toEqual(["mcode", "pi", "raycast", "omo", "cline", "commandcode", "droid", "opencode", "kilo", "qoder", "qoder-cn", "workbuddy", "workbuddy-ai", "hermes", "t3code"]);
+      expect(refresh.mock.calls[0]![1]).toEqual(["mcode", "raycast", "omo", "cline", "commandcode", "dsh", "droid", "opencode", "kilo", "qoder", "qoder-cn", "workbuddy", "workbuddy-ai", "hermes", "t3code"]);
+      // #8287: Pi refreshes through the serving proxy instead of the local fan-out.
+      expect(pi).toHaveBeenCalledTimes(1);
     } finally {
-      sync.mockRestore(); refresh.mockRestore(); aside.mockRestore(); log.mockRestore();
+      sync.mockRestore(); refresh.mockRestore(); aside.mockRestore(); pi.mockRestore(); log.mockRestore();
     }
   });
 
@@ -636,11 +639,16 @@ describe("a sibling start leaves shared client routing to the live owner", () =>
 
   test("ocx stop of a sibling claims no receipt and restores nothing", () => {
     const stop = slice("async function handleStopUnlocked(", "async function handleUninstall(");
-    const readAt = stop.indexOf("const siblingOfPort = readRuntimePort()?.siblingOfPort;");
+    const readAt = stop.indexOf("const initialRuntime = readRuntimePort();");
+    const siblingAt = stop.indexOf("const siblingOfPort = initialRuntime?.siblingOfPort;");
     expect(readAt).toBeGreaterThan(-1);
-    // Read before the first stop can remove the record.
-    expect(readAt).toBeLessThan(stop.indexOf("stopServiceIfInstalledDetailed()"));
-    expect(stop).toContain("if (teardownNonce || stoppingSibling) return;");
+    expect(siblingAt).toBeGreaterThan(readAt);
+    // Pin the marker before either stop path can remove the on-disk record.
+    for (const mutation of ["stopProxy(", "stopServiceForOcxStop(", "stopGuardedManager(", "removeRuntimePort("]) {
+      expect(stop.indexOf(mutation)).toBeGreaterThan(siblingAt);
+    }
+    expect(stop).toContain("const stoppingSibling = siblingOfPort !== undefined;");
+    expect(stop).toContain("if (teardownNonce || stoppingSibling || (!linkStop && connectedClientSkip)) return;");
     // #7563 adds a connected client to the same gate; the sibling term is unchanged.
     expect(stop).toContain("const restoreBlocked = ownershipBlocked || inheritedBlocks || nativeRestoreHandledByProxy || stoppingSibling || connectedClientSkip !== null;");
     expect(stop).toContain('if (nativeRestoreHandledByProxy && !stoppingSibling && !connectedClientSkip) record.sharedTeardown = "performed-by-proxy";');
@@ -651,11 +659,17 @@ describe("a sibling start leaves shared client routing to the live owner", () =>
     // A sibling never runs under a service manager, so an installed one is the live owner's. Asking
     // it failed the ownership check from the sibling's home: exit 1, and after a hard kill the
     // stale sibling records were never purged.
-    // #7423: the non-sibling branch claims an update-handover receipt first; the sibling term is unchanged.
-    expect(stop).toContain(': stoppingSibling || connectedClientAlreadyStopped ? "absent" : (claimHandoverBeforeManager(), stopServiceIfInstalledDetailed());');
-    // The only other caller is the guarded desktop step, which reaches the manager only when it
-    // provably owns the approved pid; a sibling's pid never is.
-    expect(stop.split("stopServiceIfInstalledDetailed()").length - 1).toBe(2);
+    expect(stop).toContain(": stoppingSibling || connectedClientAlreadyStopped ? noServiceStop() : await (async () => {");
+    const managerBranch = stop.slice(stop.indexOf(": stoppingSibling || connectedClientAlreadyStopped ? noServiceStop()"),
+      stop.indexOf("record.service = serviceStop;"));
+    expect(managerBranch).toMatch(/else claimHandoverBeforeManager\(\);\s+return stopServiceForOcxStop\(\{ receiptNonce: \(\) => teardownNonce, inheritedReceipts: inheritedTeardowns\.length \}\);\s+\}\)\(\);/);
+    // The guarded desktop step refuses a manager approval for a sibling before #7771 wiring.
+    const guardedSiblingAt = stop.indexOf('if (stoppingSibling && snapshot && snapshot.manager.kind !== "absent") {\n    return approvalChanged(');
+    expect(guardedSiblingAt).toBeGreaterThan(siblingAt);
+    expect(guardedSiblingAt).toBeLessThan(stop.indexOf("runGuardedManagerStep(snapshot,"));
+    expect(stop).not.toContain("stopServiceIfInstalledDetailed(");
+    expect(stop.split("stopServiceForOcxStop(").length - 1).toBe(1);
+    expect(stop.split("stopGuardedManager(").length - 1).toBe(1);
   });
 
   test("ocx stop of a hard-killed sibling never stops the live owner discovery falls back to", () => {
@@ -672,7 +686,7 @@ describe("a sibling start leaves shared client routing to the live owner", () =>
 
     // Wiring: the orphan path asks before it may stop anything it found, and reports success.
     const stop = slice("async function handleStopUnlocked(", "async function handleUninstall(");
-    const findAt = stop.indexOf("const live = await findLiveProxy({ acceptPackageTreeFenced: true });");
+    const findAt = stop.indexOf("const live = await findLiveProxy({ acceptPackageTreeFenced: true, ...orphanDiscoveryCap() });");
     const askAt = stop.indexOf("if (siblingStopFoundOwner(siblingOfPort, live)) {");
     const attestAt = stop.indexOf('} else if (live?.pid && (await proveLiveProxyOwnedByHome(live)) !== "proven") {');
     expect(findAt).toBeGreaterThan(-1);
@@ -733,16 +747,17 @@ describe("a sibling start leaves shared client routing to the live owner", () =>
     expect(recovery.indexOf("markCrossHomeSibling()")).toBeGreaterThan(-1);
     expect(recovery.indexOf("markCrossHomeSibling()")).toBeLessThan(recovery.indexOf("reconcileStartupJournal()"));
     const detached = slice("function detachedStartEnvironment(", "async function handleEnsure(");
-    expect(detached).toContain("const env: NodeJS.ProcessEnv = withoutSiblingMarker(process.env);");
+    expect(detached).toContain("const env: NodeJS.ProcessEnv = withoutSupervisorMarkers(withoutSiblingMarker(process.env));");
     expect(detached).toContain("delete env.OCX_SERVICE;");
-    expect(detached).toContain("delete env[SERVICE_MANAGED_ENV];");
-    expect(detached).toContain("delete env[WINDOWS_WRAPPER_PROTOCOL_ENV];");
-    expect(cliSource).toContain("env: withProcessRuntimeProvenance(withoutSiblingMarker(process.env)),");
+    expect(cliSource).toContain("env: withProcessRuntimeProvenance(withoutSupervisorMarkers(withoutSiblingMarker(process.env))),");
     // Every other detached `ocx start` is an ordinary owner too: the client auto-starts and the
     // updater's restart. A stray marker would mark them before any probe.
     const opencodeStartEnv = "env: withProcessRuntimeProvenance(opencodeProxyStartEnv(withoutSiblingMarker(process.env)) as NodeJS.ProcessEnv),";
     for (const [path, env] of [
-      ["src/cli/claude.ts", 'env: withProcessRuntimeProvenance(withoutSiblingMarker({ ...process.env, OCX_SERVICE: "1" })),'],
+      // ocx claude builds its proxy's environment in claudeProxyStartEnv (also read by the restart's
+      // owner classification) and spawns with it.
+      ["src/cli/claude.ts", 'return withoutSupervisorMarkers(withoutSiblingMarker({ ...base, OCX_SERVICE: "1" }));'],
+      ["src/cli/claude.ts", "env: withProcessRuntimeProvenance(claudeProxyStartEnv()),"],
       ["src/cli/opencode.ts", opencodeStartEnv],
       ["src/cli/minimax.ts", opencodeStartEnv],
       ["src/update/job-pinned-start.ts", "const env: NodeJS.ProcessEnv = withoutSiblingMarker(process.env);"],

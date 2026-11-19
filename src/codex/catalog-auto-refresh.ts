@@ -47,6 +47,9 @@ let liveIntervalMs: number | null = null;
  * so a converge still in flight when the timer stops cannot publish into the next generation.
  */
 let generation = 0;
+/** Keys the last drift heal found missing, and whether this process already warned about one. */
+let lastHealMissingKeys: readonly string[] = [];
+let healReported = false;
 /** setInterval does not skip a firing while the previous callback is still awaiting. */
 let inFlight = false;
 
@@ -56,6 +59,16 @@ export type CatalogChangedClientFanout =
 let clientFanout: CatalogChangedClientFanout | null = null;
 export function setCatalogAutoRefreshClientFanout(fanout: CatalogChangedClientFanout | null): void {
   clientFanout = fanout;
+}
+/**
+ * Notified after a tick committed a changed catalog. Owned by the link Child-ops scheduler, which registers only while
+ * this Home has links, so a Home without links pays one null check. Synchronous and fire-and-forget: the scheduler
+ * debounces and does its own work later.
+ */
+export type CatalogChangedLinkFanout = () => void;
+let linkFanout: CatalogChangedLinkFanout | null = null;
+export function setCatalogAutoRefreshLinkFanout(fanout: CatalogChangedLinkFanout | null): void {
+  linkFanout = fanout;
 }
 
 /** Read only a regular file, with a byte limit even if it grows after the stat. */
@@ -124,7 +137,7 @@ export function selectDriftHealCatalogPath(
 
 /** Repair only the missing config roots; catalog convergence remains the later tick step. */
 async function healCodexConfigDrift(config: OcxConfig, entryGeneration: number): Promise<"none" | "healed" | "not-healed"> {
-  const [{ codexConfigDrift }, { JOURNAL_PATH, journaledInjectedOpenaiBaseUrl, journaledInjectedRealtimeWsBaseUrl }, { shouldSyncCodexOnStart }, { injectCodexConfig }, { DEFAULT_CATALOG_PATH, resolveCodexConfigPath }, { loadConfig }, { inspectNativeCodexOwnership }] =
+  const [{ codexConfigDrift }, { JOURNAL_PATH, journaledInjectedCatalogPath, journaledInjectedOpenaiBaseUrl, journaledInjectedRealtimeWsBaseUrl, journaledInjectedRootValues }, { shouldSyncCodexOnStart }, { injectCodexConfig }, { CODEX_CONFIG_PATH, DEFAULT_CATALOG_PATH, resolveCodexCatalogPath }, { loadConfig }, { inspectNativeCodexOwnership }] =
     await Promise.all([
       import("./config-drift-heal"),
       import("./journal"),
@@ -141,14 +154,22 @@ async function healCodexConfigDrift(config: OcxConfig, entryGeneration: number):
   const journaled = {
     injectedOpenaiBaseUrl: journaledInjectedOpenaiBaseUrl({ readOnly: true }),
     injectedRealtimeWsBaseUrl: journaledInjectedRealtimeWsBaseUrl({ readOnly: true }),
+    injectedCatalogPath: journaledInjectedCatalogPath(),
+    injectedRootValues: {
+      openai_base_url: journaledInjectedRootValues("openai_base_url", { readOnly: true }),
+      experimental_realtime_ws_base_url: journaledInjectedRootValues("experimental_realtime_ws_base_url", { readOnly: true }),
+    },
   };
   const drift = codexConfigDrift(() => journaled);
   if (!drift.drifted) return "none";
+  lastHealMissingKeys = drift.missingKeys;
   const { readRuntimePort } = await import("../config/process-state");
   if (!current()) return "none";
   const runtime = readRuntimePort(process.pid);
   if (!runtime) return "not-healed";
-  const catalogPath = selectDriftHealCatalogPath(JOURNAL_PATH, DEFAULT_CATALOG_PATH, resolveCodexConfigPath);
+  const catalogPath = selectDriftHealCatalogPath(
+    JOURNAL_PATH, DEFAULT_CATALOG_PATH, path => resolveCodexCatalogPath(CODEX_CONFIG_PATH, path),
+  );
   if (!current()) return "none";
   // Keep the missing routing roots visible to the next tick. Catalog-only convergence below
   // may recreate the file now, but it does not re-inject config.toml in this tick.
@@ -233,7 +254,9 @@ async function tick(): Promise<void> {
     const heal = await healCodexConfigDrift(config, entryGeneration);
     if (entryGeneration !== generation) return;
     if (heal === "healed") {
-      console.info("[catalog-auto-refresh] injected Codex config keys were rewritten externally; re-injected");
+      const { codexConfigHealNotice } = await import("./config-drift-heal");
+      console.info(codexConfigHealNotice(lastHealMissingKeys, !healReported));
+      healReported = true;
     } else if (heal === "not-healed") {
       console.info("[catalog-auto-refresh] injected Codex config keys were rewritten externally; not re-injected this tick");
     }
@@ -262,6 +285,7 @@ async function tick(): Promise<void> {
     if (entryGeneration !== generation) return;
     recordCatalogAutoRefreshOutcome(outcome.catalogRefresh, outcome.changed, reloadRequired);
     if (outcome.changed) {
+      try { linkFanout?.(); } catch { /* the scheduler's 5-minute poll catches the change */ }
       // Privacy scan: no provider names, model ids, paths, or account identifiers.
       console.info(reloadRequired
         ? "[catalog-auto-refresh] served model set changed; running Codex sessions keep the old list until restarted (ocx sync --restart-codex)"

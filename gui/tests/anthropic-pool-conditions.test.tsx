@@ -89,6 +89,30 @@ async function mount(accountCount: number): Promise<HTMLElement> {
   return host as unknown as HTMLElement;
 }
 
+/** Mounts with a mutable apiBase so a target change keeps the same component instance. */
+async function mountAt(apiBase: string, accountCount: number): Promise<{
+  host: HTMLElement;
+  rerender: (base: string) => Promise<void>;
+}> {
+  const host = testWindow.document.createElement("div");
+  testWindow.document.body.appendChild(host as never);
+  const { createRoot } = await import("react-dom/client");
+  const root = createRoot(host);
+  mountedRoots.push(root);
+  const render = async (base: string) => {
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <AnthropicAccountPoolSettings apiBase={base} accountCount={accountCount} />
+        </LanguageProvider>,
+      );
+    });
+    await act(async () => { await flush(); });
+  };
+  await render(apiBase);
+  return { host: host as unknown as HTMLElement, rerender: render };
+}
+
 const toggleOf = (host: HTMLElement) => host.querySelector<HTMLButtonElement>("button[aria-pressed]")!;
 const nativeOf = (host: HTMLElement) => host.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
 
@@ -180,6 +204,22 @@ describe("Claude account pool conditions", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ provider: "anthropic", nativeMessages: false });
     expect(host.querySelector<HTMLInputElement>('input[aria-describedby="anthropic-pool-native-messages-help"]')!.checked).toBe(false);
+  });
+
+  test("a native Messages edit preserves the loaded reset-near-weighted strategy", async () => {
+    const writes: unknown[] = [];
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        writes.push(JSON.parse(String(init.body)));
+        return new Response(null, { status: 204 });
+      }
+      return Response.json({ enabled: true, kind: "anthropic", strategy: "reset-near-weighted" });
+    }) as typeof fetch;
+    const host = await mount(2);
+    expect(host.querySelector("#anthropic-pool-strategy")?.textContent).toContain("Weighted by nearest reset");
+    await act(async () => { nativeOf(host).click(); await flush(); });
+    expect(writes).toEqual([expect.objectContaining({ provider: "anthropic", strategy: "reset-near-weighted", nativeMessages: false })]);
+    expect(host.querySelector("#anthropic-pool-strategy")?.textContent).toContain("Weighted by nearest reset");
   });
 
   test("native Messages toggle rolls back after a failed save and stays disabled after a failed load", async () => {
@@ -387,5 +427,33 @@ describe("every locale carries the same pool claims", () => {
     expect(DICTS.ko["anthropicPool.detailsSummary"]).toBe("계정 선택 방식 알아보기");
     expect(DICTS.ko["anthropicPool.experimentalWarning"]).toContain("공식 Claude Code 클라이언트");
     expect(DICTS.ko["anthropicPool.detailsFailover"]).toContain("일시 중지");
+  });
+
+  test("a pool save carries the captured relay target and does not apply after a switch", async () => {
+    const { configureApiTargets } = await import("../src/api");
+    const { standaloneApiTargets } = await import("../src/api-targets");
+    const base = standaloneApiTargets("");
+    configureApiTargets({
+      ...base,
+      connected: true,
+      shared: { ...base.shared, baseUrl: "/api/machine/hub-relay", serverOrigin: "https://hub-a.example", transport: "relay" },
+      apiKeyId: "fixture-key",
+      relayTargetCheck: "expected-target-v1",
+    });
+    const expected: Array<string | null> = [];
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        expected.push(new Headers(init.headers).get("x-opencodex-expected-target"));
+        return Response.json({ enabled: false, strategy: "quota", stickyLimit: 1, quotaWindow: "five-hour", autoSwitchThreshold: 80 });
+      }
+      return Response.json({ enabled: true, strategy: "quota", stickyLimit: 1, quotaWindow: "five-hour", autoSwitchThreshold: 80 });
+    }) as typeof fetch;
+    try {
+      const { host } = await mountAt("/api/machine/hub-relay", 2);
+      await act(async () => { toggleOf(host).click(); await flush(); });
+      expect(expected).toEqual(["https://hub-a.example"]);
+    } finally {
+      configureApiTargets(standaloneApiTargets(""));
+    }
   });
 });

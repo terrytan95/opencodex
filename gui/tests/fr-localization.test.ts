@@ -26,6 +26,7 @@ function carriesTranslatableWords(value: string): boolean {
 }
 
 const INTENTIONAL_ENGLISH = new Set<TKey>([
+  "remoteLinkDiagnostics.colPort", // "Port" is the same word in French (a network port column).
   "usageV2.remoteLink", // Remote Link is the product name.
   "nav.antigravity", // Product name, like Codex and Claude.
   // These standalone French labels have the same spelling as English.
@@ -34,7 +35,12 @@ const INTENTIONAL_ENGLISH = new Set<TKey>([
   "context.conversation",
   "context.session",
   "nav.claude", // Product name.
+  "acctTable.pool.gemini", // Quota pool named after the product.
+  "acctTable.pool.claudeGpt", // Quota pool named after the products.
+  "acctTable.pool.argon", // Quota pool name used by the Antigravity quota API.
   "nav.codexSet", // Product name: the sidebar row reads "Codex" in every locale.
+  "codexCliUpdate.tab", // Product name: the Codex CLI tab reads "Codex CLI" in every locale.
+  "codexCliUpdate.provNpmGlobal", // "npm (global)": the tool name plus a word French spells the same.
   "kiroLogin.iam", // AWS product name, retained in the original spelling.
   // The vendor name, and the Pool 2 label that de and pt also keep: "pool" is the French UI term here.
   "sidecar.poolA",
@@ -53,6 +59,8 @@ const INTENTIONAL_ENGLISH = new Set<TKey>([
   "zoom.label",
   // "Actions" is the ordinary French word for a row's action column, read only by screen readers.
   "api.colActions",
+  // The GOAT product name, which the plan's 060 key table gives as "GOAT" in every locale.
+  "remoteLink.child.kind.goat",
   "common.github",
   // Product names and ordinary French words whose correct spelling is identical to English.
   "remote.pairingCommandWindows",
@@ -183,6 +191,8 @@ const INTENTIONAL_ENGLISH = new Set<TKey>([
   "integrations.tab.workbuddyAi",
   // T3 Code is a product name, identical in every locale.
   "integrations.tab.t3code",
+  // Antigravity is a product name, identical in every locale.
+  "gatewayClients.tab",
   "api.clientConfig.clientT3code",
   "models.reasoningEffort.minimal",
   "models.reasoningEffort.max",

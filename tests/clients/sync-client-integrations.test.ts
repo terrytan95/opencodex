@@ -8,7 +8,7 @@ import { desktopVisibleNativeSlugs, type CatalogModel } from "../../src/codex/ca
 import { claudeDesktopIntegrationEnabled, grokIntegrationEnabled } from "../../src/codex/desired-state";
 import { INTEGRATION_CLIENTS } from "../../src/integrations/registry";
 import { IntegrationMutationBusyError, runIntegrationMutationFlight, setIntegrationMutationFlightTestHook } from "../../src/integrations/mutation-flight";
-import { refreshOwnedCatalogIntegrations } from "../../src/integrations/catalog-refresh";
+import { catalogRefreshClientIds, refreshOwnedCatalogIntegrations } from "../../src/integrations/catalog-refresh";
 import * as asideProfiles from "../../src/integrations/aside-profiles";
 import { refreshOwnedIntegration } from "../../src/integrations/owned-refresh";
 import * as ownedRefresh from "../../src/integrations/owned-refresh";
@@ -65,7 +65,8 @@ describe("ocx sync fans out to enabled native clients and owned file integration
 
     expect(fn).toContain("grokIntegrationEnabled(config)");
     expect(fn).toContain("claudeDesktopIntegrationEnabled(config)");
-    expect(fn).toContain('["mcode", "pi", "aside", "raycast", "omo", "cline", "commandcode", "droid", "opencode", "kilo", "qoder", "qoder-cn", "workbuddy", "workbuddy-ai", "hermes", "t3code"]');
+    expect(fn).toContain('catalogRefreshClientIds(unattended ? "unattended" : "serverSync")');
+    expect(catalogRefreshClientIds("serverSync")).toEqual(["mcode", "pi", "aside", "raycast", "omo", "cline", "commandcode", "dsh", "droid", "opencode", "kilo", "qoder", "qoder-cn", "workbuddy", "workbuddy-ai", "hermes", "t3code"]);
     expect(fn).toContain("refreshOwnedCatalogIntegrations");
     // Native clients keep their catches; the owned catalog helper isolates file clients.
     expect(fn.match(/catch \(error\)/g)?.length).toBe(2);
@@ -609,13 +610,12 @@ describe("ocx sync refreshes an already-owned MCode integration", () => {
     expect(store.listOperations("mcode").map(row => row.kind)).toEqual(["apply"]);
   });
 
-  test("does not recreate the client home or config when MCode was removed", async () => {
+  test("leaves a removed MCode alone without recreating its home or reporting a failure", async () => {
     expect(applyIntegration(input(oldModels)).ok).toBe(true);
     removeTreeWithRetry(INTEGRATION_CLIENTS.mcode.detectDir(env, home));
 
-    const outcome = await refreshOwnedIntegration(input(newModels));
-    expect(outcome?.ok).toBe(false);
-    expect(outcome?.reason).toContain("mcode is not installed");
+    expect(await refreshOwnedIntegration(input(newModels))).toBeNull();
+    expect(store.readRecords().mcode?.clientId).toBe("mcode");
     expect(existsSync(INTEGRATION_CLIENTS.mcode.detectDir(env, home))).toBe(false);
     expect(store.listOperations("mcode").map(row => row.kind)).toEqual(["apply"]);
   });
@@ -814,9 +814,14 @@ describe("owned Pi/Aside catalogs follow filtered model selections", () => {
     const detectDir = INTEGRATION_CLIENTS[clientId].detectDir(env, home);
     removeTreeWithRetry(detectDir);
     const outcomes = await refreshOwnedCatalogIntegrations(input(filteredModels));
-    expect(outcomes).toHaveLength(1);
-    expect(outcomes[0]).toMatchObject({ client: clientId, ok: false });
-    expect(outcomes[0]?.reason).toContain(`${clientId} is not installed`);
+    // A removed file client is left alone, not reported: a warning on every model toggle
+    // for a client the user uninstalled is noise. Aside keeps its per-profile report.
+    if (clientId === "pi") expect(outcomes).toEqual([]);
+    else {
+      expect(outcomes).toHaveLength(1);
+      expect(outcomes[0]).toMatchObject({ client: clientId, ok: false });
+      expect(outcomes[0]?.reason).toContain(`${clientId} is not installed`);
+    }
     expect(existsSync(detectDir)).toBe(false);
     expect(store.readRecords()[clientId]).toEqual(recordBefore);
     expect(store.listOperations(clientId).map(row => row.kind)).toEqual(["apply"]);
@@ -910,7 +915,11 @@ test("the direct ocx sync command refreshes owned clients including OpenCode and
   expect(command).toContain("refreshOwnedCatalogIntegrations");
   // Command Code joined this fan-out with its integration: a sync must refresh its
   // provider block too, or the client keeps a stale catalog until the next apply.
-  expect(command).toContain('["mcode", "pi", "raycast", "omo", "cline", "commandcode", "droid", "opencode", "kilo", "qoder", "qoder-cn", "workbuddy", "workbuddy-ai", "hermes", "t3code"]');
+  expect(command).toContain('catalogRefreshClientIds("cliSync")');
+  expect(catalogRefreshClientIds("cliSync")).toEqual(["mcode", "raycast", "omo", "cline", "commandcode", "dsh", "droid", "opencode", "kilo", "qoder", "qoder-cn", "workbuddy", "workbuddy-ai", "hermes", "t3code"]);
+  // #8287: Pi's nested selectors are proven by the serving proxy, so its refresh is server-owned
+  // like Aside's and never runs through the local fan-out.
+  expect(command).toContain("refreshPiThroughServer");
   expect(command).toContain("refreshAsideProfilesThroughServer");
   expect(command.indexOf("syncModelsToCodex")).toBeLessThan(command.indexOf("refreshOwnedCatalogIntegrations"));
   expect(command).toContain('synced.status !== "refused"');

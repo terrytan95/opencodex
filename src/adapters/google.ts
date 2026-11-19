@@ -3,6 +3,7 @@ import type { AdapterFetchContext, AdapterRequest, IncomingMeta, ProviderAdapter
 import { debugDroppedFrame, debugProviderDiagnosticLazy } from "../lib/debug";
 import { createToolCallIdAllocator } from "./tool-call-id";
 import { openCodeGoGeminiEndpoint } from "../types/opencode-go";
+import { withProviderFailureFacts } from "../lib/failure-detail";
 import { createImageBudget, materializeInlineImage, MAX_ENCODED_BYTES_PER_IMAGE, artifactHttpUrl } from "../images/artifacts";
 import type {
   AdapterEvent,
@@ -19,10 +20,12 @@ import type {
 import { isAllowedToolChoice, namespacedToolName, resolveToolChoiceWireName, toolChoiceToolPredicate } from "../types";
 import type { OcxTool } from "../types";
 import { contentPartsToText, parseDataUrl } from "./image";
-import { GCP_CREDENTIAL_MARKER_PREFIX, gcpCredentialMarkerAccount, getVertexAccessToken } from "../lib/gcp-adc";
-import { fetchAntigravityWithRetry, fetchVertexWithRetry } from "./google-http";
+import { bindVertexRequestAuthority, GCP_CREDENTIAL_MARKER_PREFIX, gcpCredentialMarkerAccount, getVertexAccessTokenWithAuthority } from "../lib/gcp-adc";
+import { isProviderApiKeyPaused, ProviderApiKeyPausedError } from "../providers/api-key-pause";
+import { fetchAntigravityWithRetry, fetchVertexWithRetry, GOOGLE_HOSTED_ITERATION_SEND_LIMIT } from "./google-http";
 import { safeAntigravityHttpErrorMessage, safeVertexHttpErrorMessage } from "./google-errors";
-import { isVertexTruncatedTurn, vertexTruncationErrorEvent } from "./google-truncation";
+import { readDisplaySafeErrorPayloadText } from "./upstream-http-error";
+import { googleModeLabel, googlePromptBlockedEvent, googleStopReason, isGoogleTruncatedTurn, vertexTruncationErrorEvent } from "./google-truncation";
 import { antigravitySessionAnchor, antigravityUserAgentForWireModel, antigravitySessionId, isLikelyRealThoughtSignature, sanitizeAntigravityClaudeSignatures } from "./google-antigravity-wire";
 import { summarizeGoogleWireShape } from "./google-wire-shape";
 import { compileGoogleWireBody } from "./google-wire-compiler";
@@ -37,6 +40,7 @@ import {
 } from "./google-antigravity-replay";
 import { canonicalAntigravityUsageModel, resolveAntigravityEffortWireModel } from "../providers/antigravity-models";
 import { selectVertexEndpoint, vertexInferenceUrl, vertexReplayModelKey } from "./google-vertex-endpoint";
+import { captureVertexAmbientKey, vertexAmbientKeyIsCurrent } from "../providers/vertex-environment-authority";
 import { resolveVertexApiKeyProject, VERTEX_PROJECT_AUTO } from "./google-vertex-key-project";
 import { forgetThoughtSignatureForReplay, lookupReplayThoughtSignature } from "../responses/thought-signature-replay";
 import {
@@ -338,7 +342,8 @@ function geminiToolResultParts(
 ): unknown[] {
   const functionResponse: Record<string, unknown> = {
     name: wireName,
-    response: { result: geminiToolResultText(msg.content) },
+    // Google documents an "error" key for a call that failed to execute; CPA writes it on every route.
+    response: msg.isError ? { error: geminiToolResultText(msg.content) } : { result: geminiToolResultText(msg.content) },
     id: wireCallId,
   };
   const images = toolResultImageParts(msg.content);
@@ -399,6 +404,8 @@ function messagesToGeminiFormat(
 
   const contents: unknown[] = [];
   const replayedCallIds: string[] = [];
+  // On Cloud Code Assist the identity model is the routed wire model.
+  const claudeOnCloudCodeAssist = isCloudCodeAssist && /^claude-/i.test(identityModelId);
 
   const callIds = createToolCallIdAllocator();
   for (const msg of parsed.context.messages) {
@@ -463,6 +470,12 @@ function messagesToGeminiFormat(
               // video. The marker on the part is the fallback for wires without one, not this
               // wire's best effort (#5212).
               parts.push({ inline_data: { mime_type: p.mediaType, data: p.data } });
+              continue;
+            }
+            // Gemini accepts WAV and MP3 bytes as inline_data. Antigravity hands Claude models an
+            // Anthropic message, which has no audio block, so they keep the text marker.
+            if (p.type === "audio" && !claudeOnCloudCodeAssist) {
+              parts.push({ inline_data: { mime_type: p.format === "mp3" ? "audio/mp3" : "audio/wav", data: p.data } });
               continue;
             }
             // Drop empty/malformed text instead of emitting `{ text: "" }` or a bare `{}` part.
@@ -667,7 +680,7 @@ function toolChoiceToGeminiToolConfig(parsed: OcxParsedRequest): Record<string, 
   return {
     functionCallingConfig: {
       mode: "ANY",
-      allowedFunctionNames: [resolveToolChoiceWireName(parsed.context.tools, choice.name)],
+      allowedFunctionNames: [resolveToolChoiceWireName(parsed.context.tools, choice.name, choice)],
     },
   };
 }
@@ -675,8 +688,11 @@ function toolChoiceToGeminiToolConfig(parsed: OcxParsedRequest): Record<string, 
 function usageFromGemini(usage: Record<string, number> | undefined): OcxUsage | undefined {
   if (!usage) return undefined;
   return {
-    inputTokens: usage.promptTokenCount ?? 0,
-    outputTokens: usage.candidatesTokenCount ?? 0,
+    // Google reports tool-use prompt tokens (search grounding, URL context) beside the prompt.
+    inputTokens: (usage.promptTokenCount ?? 0) + (usage.toolUsePromptTokenCount ?? 0),
+    // Google reports thinking beside candidates. Every other adapter's output includes reasoning
+    // (telemetry clamps reasoning to output, src/telemetry/aggregate.ts), and Google bills it as output.
+    outputTokens: (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0),
     ...(usage.cachedContentTokenCount !== undefined ? { cachedInputTokens: usage.cachedContentTokenCount } : {}),
     ...(usage.thoughtsTokenCount !== undefined ? { reasoningOutputTokens: usage.thoughtsTokenCount } : {}),
   };
@@ -945,11 +961,15 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
   // session replay cache), but durable-store eviction is intentionally narrower: it only runs
   // when the error text explicitly mentions a signature, so a generic tool-schema
   // INVALID_ARGUMENT does not destroy valid durable signatures.
-  function handleSignatureRejection(errorMessage?: string) {
+  //
+  // `httpStatus` is the real upstream status when the rejection arrived as an HTTP error. The
+  // normalized Vertex/Antigravity error text keeps only Google's message, not its status enum,
+  // so a 400 such as "bad model" would otherwise leave the poisoned session entry in place (#8054).
+  function handleSignatureRejection(errorMessage?: string, httpStatus?: number) {
     const replayModel = provider.googleMode === "cloud-code-assist" ? antigravityModel : vertexReplayModel;
     const replaySession = provider.googleMode === "cloud-code-assist" ? antigravitySession : vertexReplaySession;
     const text = errorMessage ?? "";
-    const isInvalidArgument = /invalid_argument|invalid argument/i.test(text);
+    const isInvalidArgument = httpStatus === 400 || /invalid_argument|invalid argument/i.test(text);
     const isSignatureError = /signature|thought_signature|thoughtSignature/i.test(text);
     // The in-memory Antigravity replay cache only exists for CCA/Vertex, so clearing it stays
     // scoped to those modes (replayModel/replaySession are undefined elsewhere anyway).
@@ -981,12 +1001,24 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
     // 429 rotation and raw error formatting.
     ...(provider.googleMode === "vertex" || provider.googleMode === "cloud-code-assist"
       ? {
-          fetchResponse: (request: AdapterRequest, ctx?: AdapterFetchContext): Promise<Response> =>
-            (provider.googleMode === "cloud-code-assist" ? fetchAntigravityWithRetry : fetchVertexWithRetry)(
+          hostedIterationSendLimit: GOOGLE_HOSTED_ITERATION_SEND_LIMIT,
+          fetchResponse: async (request: AdapterRequest, ctx?: AdapterFetchContext): Promise<Response> => {
+            const res = await (provider.googleMode === "cloud-code-assist" ? fetchAntigravityWithRetry : fetchVertexWithRetry)(
               request,
               ctx,
               { toolSchemaProfile, toolSchemaPolicy },
-            ),
+            );
+            // A rejected replay usually arrives as a real HTTP 400, and the dispatcher reports a
+            // non-ok response without ever calling parseStream/parseResponse — the only other
+            // callers of clear-on-invalid. Without this, the bad signature stays cached and is
+            // replayed on every turn until the TTL expires (#8054). Read a clone so the body the
+            // dispatcher formats is untouched, and await it so the next turn cannot race ahead of
+            // the eviction. No resend here: payload rejection stays resend-is-futile.
+            if (res.status === 400) {
+              handleSignatureRejection(await readDisplaySafeErrorPayloadText(res.clone(), ctx?.abortSignal), res.status);
+            }
+            return res;
+          },
           formatErrorBody: (status: number, _headers: Headers, payloadText: string): string =>
             (provider.googleMode === "cloud-code-assist" ? safeAntigravityHttpErrorMessage : safeVertexHttpErrorMessage)(status, payloadText),
         }
@@ -1053,7 +1085,11 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
         identityModelId,
         stripRejectedClaudeSdkParagraph,
         isCloudCodeAssist,
-        provider.googleMode === "vertex" && parsed.modelId === "gemini-4-argon",
+        provider.googleMode === "vertex" && (
+          parsed.modelId === "gemini-4-argon"
+          || parsed.modelId === "gemini-4-carbon"
+          || parsed.modelId === "gemini-4-hydrogen"
+        ),
         isCloudCodeAssist && /^claude-/i.test(routedModelId),
       );
       lastInjectedCallIds = [...replayedCallIds];
@@ -1081,9 +1117,12 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
       // current behavior; Vertex participates only through an explicitly configured ladder (the
       // seed google-vertex entry ships none). Image models are excluded — thinkingConfig would
       // suppress the responseModalities fallback below. CCA maps effort on its envelope path.
-      const thinkingLevel = thinkingEligible
+      const rawThinkingLevel = thinkingEligible
         ? mapReasoningEffort(provider, parsed.modelId, parsed.options.reasoning)
         : undefined;
+      const thinkingLevel = rawThinkingLevel === "xhigh" && configuredEfforts === undefined
+        ? "high"
+        : rawThinkingLevel;
       const includeThoughts = thinkingEligible
         && provider.showThinkingSummary === true
         && parsed.options.hideThinkingSummary !== true
@@ -1221,11 +1260,20 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
         return { url, method: "POST", headers, body: JSON.stringify(envelope) };
       }
 
+      if (isProviderApiKeyPaused(provider)) throw new ProviderApiKeyPausedError();
+
       if (provider.googleMode === "vertex") {
+        if (provider.authMode === "forward") throw new Error("Vertex does not support forward authentication");
         const compiled = compileGoogleWireBody(body, toolSchemaProfile, toolSchemaPolicy);
         reportToolSchemaLoss(compiled.toolSchemaLossReport);
         restoreGoogleToolName = compiled.restoreToolName;
         const apiKey = resolveVertexApiKey(provider.apiKey);
+        const ambientAuthority = apiKey && (!provider.apiKey || provider.apiKey.startsWith("<") || provider.apiKey === "N/A")
+          ? captureVertexAmbientKey(apiKey) : undefined;
+        const beforeCredentialSend = () => {
+          incoming?.beforePhysicalSend?.();
+          if (ambientAuthority && !vertexAmbientKeyIsCurrent(ambientAuthority)) throw new Error("Vertex credential authority changed before auxiliary send");
+        };
         let vertexEndpoint = selectVertexEndpoint(provider, Boolean(apiKey));
         if (apiKey && vertexEndpoint.kind === "project" && vertexEndpoint.project === VERTEX_PROJECT_AUTO) {
           // Unresolved keys use express for this request so Google's status drives key failover.
@@ -1233,6 +1281,7 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
             signal: incoming?.abortSignal,
             provider,
             providerName: incoming?.providerName,
+            beforeSend: beforeCredentialSend,
           });
           vertexEndpoint = project ? { ...vertexEndpoint, project } : { kind: "express" };
         }
@@ -1254,13 +1303,20 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
           );
         }
         // Endpoint, location and model path were validated above, before any credential is attached.
+        let adcAuthority: Awaited<ReturnType<typeof getVertexAccessTokenWithAuthority>> | undefined;
         if (apiKey) headers["x-goog-api-key"] = apiKey;
         else {
           // Resolve each marker per request; never share a process-global active account.
           const markerAccount = gcpCredentialMarkerAccount(provider.apiKey);
-          headers["Authorization"] = `Bearer ${await getVertexAccessToken({ markerAccount })}`;
+          adcAuthority = await getVertexAccessTokenWithAuthority({ markerAccount, signal: incoming?.abortSignal, beforeSend: beforeCredentialSend });
+          headers["Authorization"] = `Bearer ${adcAuthority.token}`;
         }
-        return { url, method: "POST", headers, body: JSON.stringify(compiled.body) };
+        const request = { url, method: "POST", headers, body: JSON.stringify(compiled.body) };
+        if (adcAuthority) bindVertexRequestAuthority(request, url, headers["Authorization"]!, { source: adcAuthority.source, generation: adcAuthority.generation, markerAccount: adcAuthority.markerAccount });
+        else if (apiKey && ambientAuthority) {
+          bindVertexRequestAuthority(request, url, apiKey, { ambientKey: ambientAuthority });
+        }
+        return request;
       }
 
       // Go and Zen use separate guarded Gemini endpoints; AI Studio retains /v1beta.
@@ -1323,6 +1379,7 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
       };
       let pendingUsage: OcxUsage | undefined;
       let toolCallsStarted = 0;
+      let sawVisibleOutput = false;
       let lastFinishReason: string | undefined;
       let sawAnyFrame = false;
       let sawTerminalSignal = false;
@@ -1358,12 +1415,14 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
 
         // Inline provider error inside a 200 stream → terminal error (see openai-chat.ts).
         if (chunk.error) {
-          const err = chunk.error as { message?: string } | undefined;
+          const err = chunk.error as { message?: string; status?: unknown } | undefined;
           // Clear-on-invalid: a signature rejection means our replayed thoughtSignatures are stale.
           // Drop the cache entry and durable store entry for rejected calls so the next turn
           // starts clean instead of re-injecting a bad sig.
           handleSignatureRejection(err?.message);
-          yield { type: "error", message: err?.message ?? "upstream error" };
+          // Only the closed RPC status class and finish reason ride along for the request log (#8446).
+          yield withProviderFailureFacts({ type: "error", message: err?.message ?? "upstream error" } as AdapterEvent,
+            { type: err?.status, finishReason: lastFinishReason });
           return "terminate";
         }
 
@@ -1393,6 +1452,13 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
         // absent key and an empty array are already skipped here; `null` joins them. A non-null
         // non-array container is still claimed structure the parser cannot read, and stays
         // terminal.
+        // A prompt Google refused before generating arrives as promptFeedback with no candidates.
+        const feedback = root.promptFeedback;
+        if ((rawCandidates === undefined || rawCandidates === null || (Array.isArray(rawCandidates) && rawCandidates.length === 0))
+          && isGoogleRecord(feedback) && typeof feedback.blockReason === "string" && feedback.blockReason) {
+          yield googlePromptBlockedEvent(googleModeLabel(provider.googleMode), feedback.blockReason, pendingUsage);
+          return "terminate";
+        }
         if (rawCandidates === undefined || rawCandidates === null) return "continue";
         if (!Array.isArray(rawCandidates)) {
           yield invalidGoogleShapeEvent({
@@ -1470,6 +1536,8 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
             const textEvent = googlePartTextEvent(part, returnsThoughtSummaries);
             if (textEvent) {
               emittedContentEvent = true;
+              // Thought text is not visible output: a thoughts-only turn that drops its answer fails closed.
+              if (textEvent.type === "text_delta") sawVisibleOutput = true;
               yield textEvent;
             }
             const inline = (part as { inlineData?: { mimeType?: string; data?: string } }).inlineData;
@@ -1481,6 +1549,7 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
                   const filePath = await materializeInlineImage(inline.data, imageBudget);
                   const escapedPath = artifactMarkdownUrl(filePath);
                   emittedContentEvent = true;
+                  sawVisibleOutput = true;
                   yield { type: "text_delta", text: `\n![image](${escapedPath})\n` };
                 } catch {
                   yield { type: "error", message: "failed to materialize inline image" };
@@ -1492,6 +1561,7 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
               const id = `call_${crypto.randomUUID().slice(0, 8)}`;
               toolCallsStarted++;
               emittedContentEvent = true;
+              sawVisibleOutput = true;
               const restoredName = restoreGoogleToolName(functionCall.name);
               yield {
                 type: "tool_call_start",
@@ -1557,22 +1627,19 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
             return;
           } else if ((yield* handleDataLine(residual)) === "terminate") return;
         }
-        // Fail-closed: a turn cut off mid tool call (MAX_TOKENS / MALFORMED_FUNCTION_CALL) surfaces
-        // an error instead of a silently-incomplete done. Mirrors kiro-truncation.
-        if ((provider.googleMode === "vertex" || provider.googleMode === "cloud-code-assist")
-          && isVertexTruncatedTurn(lastFinishReason, toolCallsStarted)) {
-          yield vertexTruncationErrorEvent(lastFinishReason, toolCallsStarted, pendingUsage);
+        // Fail-closed on every Google mode: a turn cut off mid tool call (MAX_TOKENS /
+        // MALFORMED_FUNCTION_CALL), or one whose output Google dropped before anything visible
+        // arrived (UNEXPECTED_TOOL_CALL / MALFORMED_RESPONSE), surfaces an error instead of a
+        // silently incomplete done. Mirrors kiro-truncation.
+        if (isGoogleTruncatedTurn(lastFinishReason, toolCallsStarted, sawVisibleOutput)) {
+          yield vertexTruncationErrorEvent(lastFinishReason, toolCallsStarted, pendingUsage, googleModeLabel(provider.googleMode));
           return;
         }
         if (!sawAnyFrame || !sawTerminalSignal) {
           yield { type: "error", message: "upstream stream ended without a terminal signal — possible truncation" };
           return;
         }
-        const stopReason = lastFinishReason === "MAX_TOKENS"
-          ? "max_tokens"
-          : ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"].includes(lastFinishReason ?? "")
-            ? "content_filter"
-            : undefined;
+        const stopReason = googleStopReason(lastFinishReason);
         yield {
           type: "done",
           usage: pendingUsage,
@@ -1701,6 +1768,11 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
       }
       const candidates = rawCandidates as { finishReason?: string }[] | undefined;
       if (!candidates?.length) {
+        const feedback = (json as { promptFeedback?: unknown }).promptFeedback;
+        if (isGoogleRecord(feedback) && typeof feedback.blockReason === "string" && feedback.blockReason) {
+          return finish([googlePromptBlockedEvent(googleModeLabel(provider.googleMode), feedback.blockReason,
+            usageFromGemini(json.usageMetadata as Record<string, number> | undefined))]);
+        }
         return finish([{ type: "error", message: "google response contained no candidates" }]);
       }
       const rawCandidate: unknown = candidates[0];
@@ -1715,6 +1787,7 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
       }
       const candidate = rawCandidate as { content?: unknown; finishReason?: string };
       let toolCallsStarted = 0;
+      let sawVisibleOutput = false;
       const imageBudget = createImageBudget();
       const rawContent: unknown = candidate.content;
       const invalidContent = diagnoseGoogleContent(rawContent);
@@ -1741,7 +1814,10 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
             pendingThoughtSig = sig;
           }
           const textEvent = googlePartTextEvent(part, returnsThoughtSummaries);
-          if (textEvent) events.push(textEvent);
+          if (textEvent) {
+            if (textEvent.type === "text_delta") sawVisibleOutput = true;
+            events.push(textEvent);
+          }
           const inline = (part as { inlineData?: { mimeType?: string; data?: string } }).inlineData;
           if (inline && typeof inline.data === "string") {
             if (inline.data.length > MAX_ENCODED_BYTES_PER_IMAGE) {
@@ -1750,6 +1826,7 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
               try {
                 const filePath = await materializeInlineImage(inline.data, imageBudget);
                 const escapedPath = artifactMarkdownUrl(filePath);
+                sawVisibleOutput = true;
                 events.push({ type: "text_delta", text: `\n![image](${escapedPath})\n` });
               } catch {
                 events.push({ type: "error", message: "failed to materialize inline image" });
@@ -1760,6 +1837,7 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
           if (functionCall) {
             const id = `call_${crypto.randomUUID().slice(0, 8)}`;
             toolCallsStarted++;
+            sawVisibleOutput = true;
             events.push({
               type: "tool_call_start",
               id,
@@ -1772,14 +1850,13 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
         }
       }
 
-      // Fail-closed truncation, same as the stream path: a non-stream turn cut off mid tool call
-      // (MAX_TOKENS / MALFORMED_FUNCTION_CALL) surfaces an error instead of a silent done.
-      if ((provider.googleMode === "vertex" || provider.googleMode === "cloud-code-assist")
-        && isVertexTruncatedTurn(candidate.finishReason, toolCallsStarted)) {
+      // Fail-closed, same rule as the stream path, on every Google mode.
+      if (isGoogleTruncatedTurn(candidate.finishReason, toolCallsStarted, sawVisibleOutput)) {
         return finish([vertexTruncationErrorEvent(
           candidate.finishReason,
           toolCallsStarted,
           usageFromGemini(json.usageMetadata as Record<string, number> | undefined),
+          googleModeLabel(provider.googleMode),
         )]);
       }
 
@@ -1789,11 +1866,7 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
       // turn as completed — and, on a compaction turn, installs the half-written summary as
       // replacement history (#422).
       const finishReason = candidate.finishReason as string | undefined;
-      const stopReason = finishReason === "MAX_TOKENS"
-        ? "max_tokens"
-        : ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"].includes(finishReason ?? "")
-          ? "content_filter"
-          : undefined;
+      const stopReason = googleStopReason(finishReason);
       events.push({
         type: "done",
         usage: usageFromGemini(usage),

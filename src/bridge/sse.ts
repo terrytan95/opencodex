@@ -1,4 +1,4 @@
-import { UNDECLARED_TOOL_CALL_MESSAGE, isProxyError, rememberProxyIncomplete, carryProxyIncompleteContext } from "../lib/client-error-body";
+import { UNDECLARED_TOOL_CALL_MESSAGE, isProxyError, rememberProxyIncomplete, rememberPausedTurn, carryProxyIncompleteContext } from "../lib/client-error-body";
 import { anthropicProgressItems } from "../responses/anthropic-progress";
 import type {
   AdapterEvent,
@@ -39,8 +39,12 @@ import {
 import { resolveStallTimeoutSec } from "../stall-timeout";
 import {
   createCitationMarkerFilter,
+  createMemoryCitationEscaper,
+  escapeMemoryCitationMentions,
+  passthroughMemoryCitationEscaper,
   stripCitationMarkers,
   type CitationMarkerFilter,
+  type MemoryCitationEscaper,
 } from "../responses/citation-markers";
 import { declaresCodeModeExec, normalizeDeclaredToolName } from "../types";
 import { appendSafeWebSearchSource, safeWebSearchSources } from "../web-search/sources";
@@ -93,6 +97,8 @@ export function bridgeToResponsesSSE(
     chatRawReasoningVisible?: boolean;
     /** Provider policy: suppress raw content-channel reasoning, keep provider-authored summaries. */
     hideRawReasoning?: boolean;
+    /** Opt-in verbatim raw reasoning on the summary channel for Chat-to-Responses clients. */
+    rawReasoningAsSummary?: boolean;
     /**
      * Remote compaction v2 turn: accumulate all assistant text and, on done, emit ONE synthetic
      * `{type:"compaction", encrypted_content:"ocx1:"+base64(text)}` output item before
@@ -133,6 +139,12 @@ export function bridgeToResponsesSSE(
      */
     enforceDeclaredToolNames?: boolean;
     /**
+     * Escape a quoted `<oai-mem-citation>` tag in visible text (default true). The Codex client
+     * parses the tag and hides the rest of the answer; Chat Completions and Messages deliveries,
+     * whose clients never parse it, pass false so their text stays byte-for-byte.
+     */
+    escapeMemoryCitationTags?: boolean;
+    /**
      * Deliver a non-retryable upstream refusal as `response.failed` with a terminal-refusal code
      * instead of `response.incomplete` (see `./terminal-refusal`). Set only for the Responses
      * inbound wire: the chat and Anthropic encoders read the incomplete to report a filter stop.
@@ -167,6 +179,8 @@ export function bridgeToResponsesSSE(
     };
   },
 ): ReadableStream<Uint8Array> {
+  const escapeTags = options?.escapeMemoryCitationTags !== false;
+  const escapeVisibleTags = (text: string): string => escapeTags ? escapeMemoryCitationMentions(text) : text;
   const proxyIncompleteContext = options?.proxyErrorContext ?? {};
   const replayCacheScope = options?.replayCacheScope;
   const maxOutputCompletion = createMaxOutputCompletion(options);
@@ -381,6 +395,9 @@ export function bridgeToResponsesSSE(
         outputIndex: number;
         text: StringChunks;
         citationFilter: CitationMarkerFilter;
+        memoryCitationEscaper: MemoryCitationEscaper;
+        /** Bytes the escaper currently holds, charged to the translator budget. */
+        heldBytes: number;
         phase?: OcxMessagePhase;
       } | null = null;
       let currentReasoning: { itemId: string; outputIndex: number; text: StringChunks } | null = null;
@@ -570,13 +587,20 @@ export function bridgeToResponsesSSE(
         // accumulated text: closeCurrentMessage re-sends it in output_text.done and
         // output_item.done, so filtering only the deltas would leave the markers in both.
         const trailing = currentMsg.citationFilter.flush();
-        if (trailing) {
+        const escapedTrailing = trailing ? currentMsg.memoryCitationEscaper.push(trailing) : "";
+        // A held tail is a partial tag whose whole-message context is now known: resolve it once
+        // against the accumulated text so a real block's trailing close tag survives.
+        const heldTail = currentMsg.memoryCitationEscaper.pending();
+        const resolvedTail = heldTail ? escapeVisibleTags(heldTail) : "";
+        currentMsg.heldBytes = replaceRetainedString(currentMsg.heldBytes, "", "live_transient");
+        const finalDelta = escapedTrailing + resolvedTail;
+        if (finalDelta) {
           emit("response.output_text.delta", {
             item_id: currentMsg.itemId, output_index: currentMsg.outputIndex,
-            content_index: 0, delta: trailing,
+            content_index: 0, delta: finalDelta,
           });
         }
-        const messageText = stripCitationMarkers(joinChunks(currentMsg.text));
+        const messageText = escapeVisibleTags(stripCitationMarkers(joinChunks(currentMsg.text)));
         // Chat Completions has no message-phase field. Keep its live item provisional, then
         // classify it only when the next adapter event proves whether this text led into more
         // work or completed the turn. Explicit adapter phases always outrank this inference.
@@ -630,13 +654,21 @@ export function bridgeToResponsesSSE(
         if (!currentRawReasoning) return;
         const rawText = joinChunks(currentRawReasoning.text);
         rawReasoningForNextToolCall = rawText;
-        emit("response.reasoning_text.done", {
-          item_id: currentRawReasoning.itemId, output_index: currentRawReasoning.outputIndex, content_index: 0, text: rawText,
+        const asSummary = options?.rawReasoningAsSummary === true;
+        const indices = { item_id: currentRawReasoning.itemId, output_index: currentRawReasoning.outputIndex,
+          ...(asSummary ? { summary_index: 0 } : { content_index: 0 }) };
+        emit(asSummary ? "response.reasoning_summary_text.done" : "response.reasoning_text.done", {
+          ...indices, text: rawText,
         });
+        if (asSummary) emit("response.reasoning_summary_part.done", {
+          ...indices, part: { type: "summary_text", text: rawText },
+        });
+        // Keep replay independent of the display channel: clients may omit visible summaries.
+        const encrypted = asSummary ? encodeReasoningEnvelope({ txt: rawText, rawSummary: true }, budget) : undefined;
         const item = {
           type: "reasoning", id: currentRawReasoning.itemId,
-          summary: [] as never[],
-          content: [{ type: "reasoning_text", text: rawText }],
+          summary: asSummary ? [{ type: "summary_text", text: rawText }] : [],
+          ...(asSummary ? { encrypted_content: encrypted } : { content: [{ type: "reasoning_text", text: rawText }] }),
         };
         emit("response.output_item.done", { output_index: currentRawReasoning.outputIndex, item });
         retainFinishedItem(item as OutputItem, currentRawReasoning.text.bytes, "reasoning");
@@ -982,13 +1014,15 @@ export function bridgeToResponsesSSE(
                 flushHiddenRawReasoning();
                 flushHiddenReasoningEnvelope();
                 if (currentToolCall) closeCurrentToolCall();
-                for (const item of anthropicProgressItems(event.text, event.anthropicThinkingSignature, budget)) {
+                for (const item of anthropicProgressItems(event.text, event.anthropicThinkingSignature, budget, escapeTags)) {
                   emit("response.output_item.added", { output_index: outputIndex, item: { ...item, ...(item.type === "message" ? { status: "in_progress", content: [] } : {}) } });
                   if (item.type === "message") {
                     const part = item.content![0];
                     emit("response.content_part.added", { item_id: item.id, output_index: outputIndex, content_index: 0, part: { ...part, text: "" } });
-                    emit("response.output_text.delta", { item_id: item.id, output_index: outputIndex, content_index: 0, delta: event.text });
-                    emit("response.output_text.done", { item_id: item.id, output_index: outputIndex, content_index: 0, text: event.text });
+                    // The visible copy is escaped; the carrier envelope above keeps the raw text.
+                    const visibleText = escapeVisibleTags(event.text);
+                    emit("response.output_text.delta", { item_id: item.id, output_index: outputIndex, content_index: 0, delta: visibleText });
+                    emit("response.output_text.done", { item_id: item.id, output_index: outputIndex, content_index: 0, text: visibleText });
                     emit("response.content_part.done", { item_id: item.id, output_index: outputIndex, content_index: 0, part });
                   }
                   emit("response.output_item.done", { output_index: outputIndex, item });
@@ -1026,6 +1060,8 @@ export function bridgeToResponsesSSE(
                 currentMsg = {
                   itemId, outputIndex, text: emptyChunks(),
                   citationFilter: createCitationMarkerFilter(),
+                  memoryCitationEscaper: escapeTags ? createMemoryCitationEscaper() : passthroughMemoryCitationEscaper,
+                  heldBytes: 0,
                   ...(event.phase ? { phase: event.phase } : {}),
                 };
               }
@@ -1038,10 +1074,19 @@ export function bridgeToResponsesSSE(
               // unterminated tail and releases it at close (#3150). The accumulator above
               // keeps the raw text; it is stripped once in closeCurrentMessage.
               const visible = currentMsg.citationFilter.push(event.text);
-              if (visible) {
+              // Escape a literal memory-citation tag: the Codex client hides everything from an
+              // opening tag to the first closing one (or to the end when none follows), so one
+              // quoted mention in prose swallows the rest of the answer and reads as a truncated
+              // turn. This runs per
+              // delta, so it uses the streaming escaper: a tag arrives split across deltas, and a
+              // whole-string match inside a single delta would miss it.
+              const emitted = visible ? currentMsg.memoryCitationEscaper.push(visible) : "";
+              currentMsg.heldBytes = replaceRetainedString(
+                currentMsg.heldBytes, currentMsg.memoryCitationEscaper.pending(), "live_transient");
+              if (emitted) {
                 emit("response.output_text.delta", {
                   item_id: currentMsg.itemId, output_index: currentMsg.outputIndex,
-                  content_index: 0, delta: visible,
+                  content_index: 0, delta: emitted,
                 });
               }
               break;
@@ -1137,6 +1182,10 @@ export function bridgeToResponsesSSE(
                 const itemId = outputItemId("reasoning", "rs");
                 const item = { type: "reasoning", id: itemId, summary: [] as { type: string; text: string }[] };
                 emit("response.output_item.added", { output_index: outputIndex, item });
+                if (options?.rawReasoningAsSummary) emit("response.reasoning_summary_part.added", {
+                  item_id: itemId, output_index: outputIndex, summary_index: 0,
+                  part: { type: "summary_text", text: "" },
+                });
                 currentRawReasoning = { itemId, outputIndex, text: emptyChunks() };
               }
               currentRawReasoning.text = appendString(
@@ -1144,12 +1193,10 @@ export function bridgeToResponsesSSE(
                 event.text,
                 "reasoning",
               );
-              // Raw reasoning (openai-chat reasoning_content, kiro tags) rides the CONTENT
-              // channel. Clients control raw-reasoning display; this text is not a
-              // provider-authored summary.
-              emit("response.reasoning_text.delta", {
+              // Raw text stays verbatim; only the explicit compatibility option changes its channel.
+              emit(options?.rawReasoningAsSummary ? "response.reasoning_summary_text.delta" : "response.reasoning_text.delta", {
                 item_id: currentRawReasoning.itemId, output_index: currentRawReasoning.outputIndex,
-                content_index: 0, delta: event.text,
+                ...(options?.rawReasoningAsSummary ? { summary_index: 0 } : { content_index: 0 }), delta: event.text,
               });
               break;
             }
@@ -1386,6 +1433,10 @@ export function bridgeToResponsesSSE(
               if (truncationReasonFor(event.stopReason) && !maxOutputCompletion.completed) {
                 // Upstream stopped before a normal completion. Surface as incomplete so the
                 // client can distinguish a truncated/filtered turn from a finished one.
+                // `pause_turn` also maps to max_output_tokens for the client, but the turn is
+                // paused and expected to continue: record the request-scoped fact so combo
+                // preflight does not read it as an exhausted output budget and replay it.
+                if (event.stopReason?.trim().toLowerCase() === "pause_turn") rememberPausedTurn(proxyIncompleteContext);
                 // #1926 gap 2: bound the window in which a handed-out thought signature is
                 // not yet durable before the turn becomes externally terminal.
                 await awaitThoughtSignatureDurability();
@@ -1418,6 +1469,9 @@ export function bridgeToResponsesSSE(
             }
             case "incomplete": {
               if (isProxyError(event) && event.reason === "adapter_eof") rememberProxyIncomplete(proxyIncompleteContext, "adapter_eof");
+              // Same request-scoped distinction as the `done` case below: the client still sees
+              // max_output_tokens, while combo preflight can tell a paused turn from a real limit.
+              if (event.reason?.trim().toLowerCase() === "pause_turn") rememberPausedTurn(proxyIncompleteContext);
               if (currentMsg) closeCurrentMessage();
               if (currentReasoning) closeCurrentReasoning();
               if (currentRawReasoning) closeCurrentRawReasoning();

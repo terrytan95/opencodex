@@ -1,3 +1,6 @@
+import { oauthSubscriptionMaker } from "../combos/suggestion-channel";
+import { isCanonicalOpenAiForwardProvider } from "../providers/openai-forward-destination";
+import { transientRetryOn5xxPolicyConfigError } from "../config/load-degrade";
 import { providerRelativeSendPathConfigError } from "../config/provider-relative-send-path";
 import { contextTierRecordConfigError, modelCapabilitiesConfigError, providerInputModalitiesConfigError } from "../config/provider-validation";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
@@ -10,6 +13,7 @@ import {
   providerModelCostsConfigError,
   providerWebSearchBridgeConfigError,
   requestPacingConfigError,
+  providerTimeoutOverrideConfigError,
   retryOn429PolicyConfigError,
   retryOnResetPolicyConfigError,
   sanitizeModelCostsForDisplay,
@@ -29,10 +33,14 @@ import {
   providerHeadersConfigError,
   providerForwardClientHeadersConfigError,
   reasoningSummaryDeliveryRecordConfigError,
+  thinkingDisplayConfigError,
+  modelThinkingDisplayConfigError,
   upstreamHttpVersionConfigError,
   credentialPinnedProviderConfigError,
 } from "../config/provider-validation";
 import { providerDestinationConfigError } from "../lib/destination-policy";
+import { gcpCredentialMarkerAccount, vertexAdcCredentialVerified, vertexConfiguredCredentialKind } from "../lib/gcp-adc";
+import { selectVertexDiscoveryCredential } from "../providers/google-vertex-model-discovery";
 import { providerEgressConfigError } from "../lib/provider-egress";
 import { providerTlsProfileConfigError } from "../lib/provider-tls-profile";
 import { redactSecretString } from "../lib/redact";
@@ -41,6 +49,7 @@ import { effectiveGoogleMode, getProviderRegistryEntry, providerCodexAccountMode
 import { providerConfigSeed } from "../providers/derive";
 import { anthropicOAuthInstanceConfigError } from "../config/schema/anthropic-account-pool";
 import { accountAutoPausePolicySchema } from "../config/schema/account-auto-pause";
+import { normalizeProxyAddress, parseDashboardTrustedProxy } from "../config/dashboard-trusted-proxy";
 import type { OcxConfig, OcxProviderConfig } from "../types";
 import { openRouterRoutingConfigError } from "../providers/openrouter-routing";
 import { modelAutoCompactTokenLimitsConfigError } from "../providers/auto-compact-budget";
@@ -49,6 +58,7 @@ import { googleVertexLocationConfigError } from "../providers/google-vertex-loca
 import { xaiResponsesOptInState } from "../providers/xai-responses-opt-in";
 import { authorizationCredential } from "../lib/authorization-scheme";
 import { noteTurnStateCaller } from "./turn-state-handles";
+import { providerModelDiscoveryConfigError } from "../providers/model-discovery-config";
 
 let _corsOrigin = "http://localhost:10100";
 // Listener identity is process-local. Never infer this trust from forwarded headers: the
@@ -62,6 +72,59 @@ export function markTrustedHubManagementRequest(req: Request): void {
 
 export function inheritTrustedHubManagementRequest(source: Request, target: Request): void {
   if (trustedHubManagementRequests.has(source)) trustedHubManagementRequests.add(target);
+  const peer = dashboardProxyPeers.get(source);
+  if (peer !== undefined) dashboardProxyPeers.set(target, peer);
+}
+
+// #8338: the kernel-observed peer of a public-listener request, recorded by the serve layer the
+// same way as the hub mark above. No header can create or change it.
+const dashboardProxyPeers = new WeakMap<Request, string>();
+
+export function markDashboardProxyPeer(req: Request, address: string | undefined): void {
+  const normalized = address ? normalizeProxyAddress(address) : null;
+  if (normalized) dashboardProxyPeers.set(req, normalized);
+}
+
+/** One forwarded value: undefined when absent, null when empty or a multi-hop list. */
+function singleForwardedValue(req: Request, name: string): string | null | undefined {
+  const value = req.headers.get(name);
+  if (value === null) return undefined;
+  const trimmed = value.trim();
+  return trimmed && !trimmed.includes(",") ? trimmed : null;
+}
+
+function forwardedAuthorityHost(value: string): string | null {
+  try {
+    const url = new URL(`https://${value}`);
+    return url.username || url.password || url.pathname !== "/" || url.search || url.hash ? null : url.host;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The configured dashboard origin when, and only when, the configured proxy delivered this request
+ * (#8338). The peer must be one of `proxyAddresses`; the browser host comes from Host, or from
+ * X-Forwarded-Host when that header is trusted; X-Forwarded-Proto must say https when trusted. A
+ * forwarded host or scheme that contradicts the configured origin refuses even when that header is
+ * not trusted, so a forged value can never pass silently. Standalone with remote auth only: a
+ * loopback bind must never hand local trust to whatever the proxy forwards.
+ */
+export function dashboardProxyOrigin(req: Request, config: OcxConfig): string | null {
+  if (config.dashboardTrustedProxy === undefined) return null;
+  const peer = dashboardProxyPeers.get(req);
+  if (peer === undefined) return null;
+  if ((config.runtimeRole ?? "standalone") !== "standalone" || !isApiAuthRequired(config)) return null;
+  const settings = parseDashboardTrustedProxy(config.dashboardTrustedProxy);
+  if (typeof settings === "string" || !settings.addresses.has(peer)) return null;
+  const forwardedHost = singleForwardedValue(req, "X-Forwarded-Host");
+  const forwardedProto = singleForwardedValue(req, "X-Forwarded-Proto");
+  if (forwardedHost === null || forwardedProto === null) return null;
+  if (forwardedHost !== undefined && forwardedAuthorityHost(forwardedHost) !== settings.host) return null;
+  if (forwardedProto !== undefined && forwardedProto.toLowerCase() !== "https") return null;
+  if (settings.trust.has("x-forwarded-proto") && forwardedProto === undefined) return null;
+  const authority = settings.trust.has("x-forwarded-host") ? forwardedHost : req.headers.get("Host");
+  return authority && forwardedAuthorityHost(authority) === settings.host ? settings.origin : null;
 }
 
 export function setCorsOrigin(port: number): void { _corsOrigin = `http://localhost:${port}`; }
@@ -149,6 +212,9 @@ function comparableOrigin(value: string): string | null {
 }
 
 export function managementRequestOrigin(req: Request, config: OcxConfig): string | null {
+  // #8338: a request the configured dashboard proxy delivered speaks for the configured origin.
+  const proxied = dashboardProxyOrigin(req, config);
+  if (proxied) return proxied;
   const host = req.headers.get("Host");
   const parsedHost = parseHttpHost(host);
   if (!host || !parsedHost) return null;
@@ -491,6 +557,28 @@ export function contextPrincipalIdOf(admission: DataPlaneAdmission | undefined):
 }
 
 /**
+ * Recheck a content-free loopback identity after its local-only header was discarded.
+ * This only revokes retained replay identity; it never grants data-plane admission.
+ */
+export function isContextPrincipalCurrent(principal: string | undefined, config: Pick<OcxConfig, "apiKeys">): boolean {
+  if (!principal) return false;
+  const environment = configuredApiAuthToken(config);
+  if (environment && mintContextPrincipal("environment", "", environment) === principal) return true;
+  const matches = (keyId: string, secret: string): boolean => {
+    if (!secret || mintContextPrincipal("configured", keyId, secret) !== principal) return false;
+    // Preserve the resolver's precedence if an environment token or another key
+    // now shadows this entry. The same key id with a replacement secret is not this owner.
+    return contextPrincipalIdOf(resolveDataPlaneAdmissionSecret(secret, config) ?? undefined) === principal;
+  };
+  for (const key of config.apiKeys ?? []) {
+    if (matches(key.id, key.key)) return true;
+    const pending = key.pendingRotation;
+    if (pending && Date.parse(pending.expiresAt) > Date.now() && matches(key.id, pending.key)) return true;
+  }
+  return false;
+}
+
+/**
  * The caller principal for a context-relay request, which is a stricter question than admission.
  *
  * The default bind is loopback, where admission deliberately never reads a token, so an admitted
@@ -513,6 +601,22 @@ export function resolveContextPrincipal(req: Request, config: OcxConfig, admissi
     const principal = contextPrincipalIdOf(resolved ?? undefined);
     if (principal) return principal;
   }
+  return undefined;
+}
+
+/** Preserve only loopback replay identity removed by the forwarding-header filter. */
+export function resolveFilteredReplayPrincipal(
+  req: Request,
+  config: OcxConfig,
+  admission: DataPlaneAdmission,
+  forwardHeaders: Headers,
+): Readonly<{ clientPrincipalId: string }> | undefined {
+  if (admission.kind !== "loopback"
+    || !(req.headers.has("x-opencodex-api-key") || req.headers.has("x-api-key"))) return undefined;
+  const principal = resolveContextPrincipal(req, config, admission);
+  const forwardedPrincipal = resolveContextPrincipal(new Request(req.url, { headers: forwardHeaders }), config, admission);
+  // A surviving bearer keeps its existing per-frame resolution and key-rotation semantics.
+  if (principal && principal !== forwardedPrincipal) return Object.freeze({ clientPrincipalId: principal });
   return undefined;
 }
 
@@ -606,6 +710,8 @@ export const AUTH_MATRIX: readonly ApiAuthMatrixRow[] = [
   { endpoint: "/v1/hub-state", bearer: "accepted", dedicated: "accepted", xApiKey: "accepted" },
   // Usage additionally requires a configured key identity; unscoped environment keys are refused.
   { endpoint: "/v1/usage", bearer: "rejected", dedicated: "accepted", xApiKey: "rejected" },
+  // Usage windows require a configured, single-provider key with full model scope.
+  { endpoint: "/v1/usage/windows", bearer: "accepted", dedicated: "accepted", xApiKey: "rejected" },
 ];
 
 /** Whether `token` is the environment-provided management secret. */
@@ -807,6 +913,10 @@ export function providerManagementConfigError(
   }
   if (name === "chatgpt") return "provider chatgpt is reserved for internal credential compatibility";
   if (name === "openai-multi") return "provider openai-multi is reserved for legacy config migration";
+  const timeoutOverrideError = providerTimeoutOverrideConfigError(raw);
+  if (timeoutOverrideError) {
+    return `provider ${JSON.stringify(redactSecretString(name))} ${timeoutOverrideError}`;
+  }
   if (name === "openai") {
     const entry = getProviderRegistryEntry(name);
     const seed = entry ? providerConfigSeed(entry) : undefined;
@@ -830,6 +940,7 @@ export function providerManagementConfigError(
     // sends recover, not what the canonical forward seed is. Validated below
     // (retryOnResetPolicyConfigError).
     delete canonicalCandidate.retryOnReset;
+    delete canonicalCandidate.transientRetryOn5xx;
     // Validated account eligibility policy is independent of the canonical transport.
     delete canonicalCandidate.accountAutoPause;
     // Context windows are the same kind of user-owned overlay as requestPacing: the operator
@@ -851,6 +962,9 @@ export function providerManagementConfigError(
     // forwardClientHeaders is an editor-managed request-metadata overlay. It is validated
     // separately below and must not make an otherwise canonical OpenAI provider fail the seed check.
     delete canonicalCandidate.forwardClientHeaders;
+    // Timeout overrides are validated above and are independent of the canonical seed.
+    delete canonicalCandidate.connectTimeoutMs;
+    delete canonicalCandidate.stallTimeoutSec;
     // Canonical ChatGPT keeps WebSocket as the default, but an operator may
     // select the existing HTTP/SSE path without changing its auth or endpoint.
     if (raw.upstreamWebsocket !== undefined) {
@@ -895,6 +1009,10 @@ export function providerManagementConfigError(
     // The provider name is caller-controlled and can be token-shaped; redact and JSON-escape
     // it before it reaches the management API response.
     return `provider ${JSON.stringify(redactSecretString(name))} ${retryOn429Error}`;
+  }
+  const transientRetryError = transientRetryOn5xxPolicyConfigError(raw.transientRetryOn5xx);
+  if (transientRetryError) {
+    return `provider ${JSON.stringify(redactSecretString(name))} ${transientRetryError}`;
   }
   const retryOnResetError = retryOnResetPolicyConfigError(raw.retryOnReset);
   if (retryOnResetError) {
@@ -949,6 +1067,10 @@ export function providerManagementConfigError(
     raw.modelSupportsReasoningSummaries,
   );
   if (reasoningSummaryDeliveryError) return `provider ${name} ${reasoningSummaryDeliveryError}`;
+  const thinkingDisplayError = thinkingDisplayConfigError(raw.thinkingDisplay);
+  if (thinkingDisplayError) return `provider ${name} ${thinkingDisplayError}`;
+  const modelThinkingDisplayError = modelThinkingDisplayConfigError(raw.modelThinkingDisplay);
+  if (modelThinkingDisplayError) return `provider ${name} ${modelThinkingDisplayError}`;
   const modelAdaptersError = modelAdapterRecordConfigError(raw.modelAdapters, "modelAdapters", name, typed);
   if (modelAdaptersError) return `provider ${name} ${modelAdaptersError}`;
   const credentialPinError = credentialPinnedProviderConfigError(name, typed);
@@ -987,24 +1109,24 @@ export function providerManagementConfigError(
   if (jsonSchemaOptOutError) return `provider ${name} ${jsonSchemaOptOutError}`;
   const retainModelsError = nonBlankStringArrayConfigError(raw.retainModels, "retainModels");
   if (retainModelsError) return `provider ${name} ${retainModelsError}`;
+  const modelDiscoveryError = providerModelDiscoveryConfigError(raw.modelDiscovery);
+  if (modelDiscoveryError) return `provider ${JSON.stringify(redactSecretString(name))} ${modelDiscoveryError}`;
   const toolReasoningOptOutError = nonBlankStringArrayConfigError(
     raw.omitReasoningEffortWithToolsModels,
     "omitReasoningEffortWithToolsModels",
   );
   if (toolReasoningOptOutError) return `provider ${name} ${toolReasoningOptOutError}`;
-  const unsupportedHostedToolsError = nonBlankStringArrayConfigError(
-    raw.unsupportedHostedTools,
-    "unsupportedHostedTools",
-  );
-  if (unsupportedHostedToolsError) return `provider ${name} ${unsupportedHostedToolsError}`;
-  if (Array.isArray(raw.unsupportedHostedTools)) {
+  for (const field of ["unsupportedHostedTools", "unsupportedHostedToolsWithClientTools"] as const) {
+    const hostedToolsError = nonBlankStringArrayConfigError(raw[field], field);
+    if (hostedToolsError) return `provider ${name} ${hostedToolsError}`;
+    if (!Array.isArray(raw[field])) continue;
     // Closed vocabulary, same reason as the config schema: an unrecognized name would be
     // stored and then strip nothing, so the operator would keep getting the upstream 400
     // this field exists to prevent.
-    const unknownTool = (raw.unsupportedHostedTools as unknown[])
+    const unknownTool = (raw[field] as unknown[])
       .find(tool => typeof tool === "string" && !DECLARABLE_HOSTED_TOOL_TYPES.has(tool.trim()));
     if (unknownTool !== undefined) {
-      return `provider ${name} unsupportedHostedTools must name only hosted tool types: `
+      return `provider ${name} ${field} must name only hosted tool types: `
         + `${[...DECLARABLE_HOSTED_TOOL_TYPES].join(", ")}`;
     }
   }
@@ -1071,12 +1193,15 @@ type ProviderConfigFieldPolicy = "editor" | "redacted" | "runtime";
 const PROVIDER_CONFIG_FIELD_POLICY = {
   alias: "editor",
   modelAliases: "editor",
+  aliasTemplate: "editor",
   modelDisplayNames: "editor",
   defaultAliases: "editor",
   adapter: "editor",
   codexToolMode: "editor",
   projectContext: "editor",
   requestPacing: "editor",
+  connectTimeoutMs: "editor",
+  stallTimeoutSec: "editor",
   mcpMaxTools: "editor",
   mcpMaxSchemaBytes: "editor",
   mcpMaxResultBytes: "editor",
@@ -1130,6 +1255,7 @@ const PROVIDER_CONFIG_FIELD_POLICY = {
   defaultModel: "editor",
   models: "editor",
   liveModels: "editor",
+  modelDiscovery: "editor",
   selectedModels: "editor",
   initialModelSelection: "runtime",
   retainModels: "editor",
@@ -1148,6 +1274,7 @@ const PROVIDER_CONFIG_FIELD_POLICY = {
   minMaxOutputTokens: "editor",
   modelMaxOutputTokens: "editor",
   modelCosts: "editor",
+  creditPriceUsd: "editor",
   headers: "redacted",
   forwardClientHeaders: "editor",
   openRouterRouting: "editor",
@@ -1175,6 +1302,8 @@ const PROVIDER_CONFIG_FIELD_POLICY = {
   modelSupportsVerbosity: "editor",
   supportsVerbosity: "editor",
   modelReasoningSummaryDelivery: "editor",
+  thinkingDisplay: "editor",
+  modelThinkingDisplay: "editor",
   modelPreferHostedTools: "editor",
   supportsOpenAiWebSearchToolFields: "editor",
   xaiResponsesXSearch: "editor",
@@ -1182,6 +1311,7 @@ const PROVIDER_CONFIG_FIELD_POLICY = {
   zaiResponsesDefaultVersion: "runtime",
   supportsResponsesCustomTools: "editor",
   unsupportedHostedTools: "editor",
+  unsupportedHostedToolsWithClientTools: "editor",
   responsesSnapshotRepair: "editor",
   webSearchBridge: "editor",
   reasoningEffortMap: "editor",
@@ -1191,6 +1321,7 @@ const PROVIDER_CONFIG_FIELD_POLICY = {
   noTemperatureModels: "editor",
   noTopPModels: "editor",
   noStopModels: "editor",
+  arkKimiResponsesModels: "editor",
   noPenaltyModels: "editor",
   noStructuredOutputModels: "editor",
   noJsonSchemaModels: "editor",
@@ -1202,6 +1333,7 @@ const PROVIDER_CONFIG_FIELD_POLICY = {
   foldDeveloperRoleToSystem: "editor",
   singleLeadingSystemMessage: "editor",
   promptCacheKey: "editor",
+  cacheAffinity: "editor",
   chatServiceTier: "editor",
   responsesItemIdRepair: "editor",
   autoToolChoiceOnlyModels: "editor",
@@ -1209,6 +1341,7 @@ const PROVIDER_CONFIG_FIELD_POLICY = {
   requiresReasoningPlaceholderModels: "editor",
   showThinkingSummary: "editor",
   hideRawReasoning: "editor",
+  rawReasoningAsSummary: "editor",
   retryOn429: "editor",
   transientRetryOn5xx: "editor",
   retryOnReset: "editor",
@@ -1219,6 +1352,9 @@ const PROVIDER_CONFIG_FIELD_POLICY = {
   thinkingBudgetModels: "editor",
   escapeBuiltinToolNames: "editor",
   anthropicEofTolerance: "editor",
+  anthropicImageContextRecovery: "editor",
+  forwardAdvisorTool: "editor",
+  perMessageEffort: "editor",
   noVisionModels: "editor",
   googleMode: "editor",
   project: "editor",
@@ -1228,7 +1364,9 @@ const PROVIDER_CONFIG_FIELD_POLICY = {
   unsafeAllowNativeLocalExec: "editor",
   nativeLocalExec: "editor",
   messagePhaseInference: "editor",
+  estimateMissingUsage: "editor",
   tlsProfile: "editor",
+  anthropicOAuthUserInstructions: "editor",
 } as const satisfies Record<keyof OcxProviderConfig, ProviderConfigFieldPolicy>;
 
 type ProviderFieldWithPolicy<Policy extends ProviderConfigFieldPolicy> = {
@@ -1359,7 +1497,25 @@ export function safeConfigDTO(config: OcxConfig): unknown {
       ...editor.providers[name],
       hasApiKey: !!provider.apiKey,
       hasHeaders: !!provider.headers && Object.keys(provider.headers).length > 0,
+      ...(provider.authMode === "oauth" ? { knownSubscriptionOAuth: oauthSubscriptionMaker({ ...provider, name }) !== undefined } : {}),
+      ...(provider.authMode === "forward" ? { canonicalOpenAiForward: isCanonicalOpenAiForwardProvider(provider) } : {}),
     };
+    const registry = getProviderRegistryEntry(name);
+    const vertex = (provider.adapter === "google" && effectiveGoogleMode(name, provider) === "vertex")
+      || (registry?.adapter === "google" && (provider.googleMode ?? registry.googleMode) === "vertex"
+        && providerMatchesRegistryTransport(name, provider));
+    if (vertex) {
+      const key = provider.apiKey;
+      dto.vertexCredentialKind = vertexConfiguredCredentialKind(key);
+      if (dto.vertexCredentialKind === "ambient" || dto.vertexCredentialKind === "marker") {
+        // Proof is reported only for the credential inference selects: an ambient row with
+        // GOOGLE_CLOUD_API_KEY set sends that key, so an ADC token says nothing about it.
+        try {
+          const selection = selectVertexDiscoveryCredential(provider);
+          if (selection.kind === "adc") dto.vertexCredentialVerified = vertexAdcCredentialVerified(gcpCredentialMarkerAccount(selection.marker));
+        } catch { dto.vertexCredentialVerified = false; }
+      }
+    }
     if (name === "xai") {
       dto.xaiResponsesOptInState = xaiResponsesOptInState(provider);
     }
@@ -1378,6 +1534,7 @@ export function safeConfigDTO(config: OcxConfig): unknown {
     // historical auto-open behavior.
     oauthOpenBrowser: config.oauthOpenBrowser !== false,
     showCodexCredits: config.showCodexCredits === true,
+    subscriptionReserve: config.subscriptionReserve,
     providers,
   };
 }

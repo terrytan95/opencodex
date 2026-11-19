@@ -1,4 +1,4 @@
-import { markProxyError } from "../../lib/client-error-body";
+import { markProxyError, rememberProxyErrorMessage } from "../../lib/client-error-body";
 import { supportsNativeResponsesCompactionTrigger } from "../../providers/openai-tiers";
 import type { OcxConfig } from "../../types";
 import type { RequestLogContext } from "../request-log";
@@ -11,6 +11,7 @@ import type {
 import type { TranslatorBudget } from "../../lib/translator-budget";
 import { prepareResponsesRequest } from "./request-prepare";
 import { prepareResponsesTransport } from "./request-transport";
+import { initialHostedAdvisorSpendRefusal } from "./hosted-advisor-spend";
 import { prepareResponsesSidecarAuth } from "./request-sidecar-auth";
 import { createResponsesEffects } from "./response-effects";
 import { createResponsesSendBudget } from "./request-send-budget";
@@ -25,6 +26,9 @@ import { releaseUpstreamHostAdmission } from "../../codex/upstream-host-health";
 import { releaseCodexAuthContextProbeLease } from "../../codex/auth-context";
 import { formatErrorResponse } from "../../bridge";
 import { InvalidRetainedCompactionSummary, prepareCompactionRetention } from "./compaction-retention";
+import { responsesHasInstructionImage } from "../../adapters/claude-cli/instruction-images";
+import { markResponseNonReplayable } from "../../lib/upstream-retry";
+import { agyAcpPreflightResponse } from "./agy-acp-preflight";
 
 /** Compose request phases while retaining the original admission-finally ownership. */
 export async function handleResponsesInner(
@@ -46,6 +50,33 @@ export async function handleResponsesInner(
     if (requestState instanceof Response) return requestState;
     const transportState = await prepareResponsesTransport(requestContext, admissionState, requestState);
     if (transportState instanceof Response) return markProxyError(transportState);
+    const agyAcpRefusal = agyAcpPreflightResponse({
+      adapterName: transportState.runTurnAdapter.name, requestHeaders: req.headers,
+      forwardHeaders: requestState.selectedForwardHeaders, body: requestState.parsed._rawBody, comboAttempt: options.comboAttempt === true,
+      internalDecisionCall: options.internalDecisionCall === true, subagentFallback: requestState.subagentFallbackSelected,
+      inboundTransport: options.inboundTransport, unattendedHttpTurn: options.agyAcpUnattendedHttpTurn, logCtx,
+    });
+    if (agyAcpRefusal) return agyAcpRefusal;
+    const hostedAdvisorRefusal = initialHostedAdvisorSpendRefusal(requestContext, requestState, transportState);
+    if (hostedAdvisorRefusal) return hostedAdvisorRefusal;
+    if (transportState.runTurnAdapter.name === "claude-cli") {
+      const instructionImage = options.chatInstructionImage || options.responsesInstructionImage
+        || responsesHasInstructionImage(requestState.parsed._rawBody)
+        || requestState.parsed.context.messages.some(message => message.role === "developer"
+          && Array.isArray(message.content) && message.content.some(part => part.type === "image"));
+      if (instructionImage || options.responsesFileImage) {
+        const message = instructionImage ? "Claude Code CLI does not support images in developer instructions."
+          : "Claude Code CLI does not support file-backed image references.";
+        const response = new Response(JSON.stringify({ error: {
+          type: "invalid_request_error", code: "unsupported_input_modality", param: null,
+          message,
+        } }), { status: 400, headers: { "Content-Type": "application/json" } });
+        rememberProxyErrorMessage(logCtx, message, { status: 400, type: "invalid_request_error", code: "unsupported_input_modality" });
+        markProxyError(response);
+        markResponseNonReplayable(response);
+        return response;
+      }
+    }
     options.onCompactionRecoveryRoute?.(requestState.route);
     if (requestState.parsed._compactionRequest && options.compactionRecoveryKind !== "compaction-v1"
       && (requestState.parsed._portableCompaction || !supportsNativeResponsesCompactionTrigger(requestState.route.provider))) {

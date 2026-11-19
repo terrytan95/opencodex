@@ -73,18 +73,20 @@ test("dedicated route loads only Antigravity and preserves selection until an ex
   expect(readPageFromHash("#antigravity")).toBe("antigravity");
   expect(resolveAppHashChange("antigravity")).toEqual({ page: "antigravity", replaceTo: null });
   await mount();
-  expect(host.querySelectorAll(".pwi-auth-acct").length).toBe(2);
+  expect(host.querySelectorAll(".aqt-group").length).toBe(2);
   expect(requests.every(request => request.url.includes("provider=google-antigravity"))).toBe(true);
   expect(requests.every(request => request.method === "GET")).toBe(true);
-  expect(host.textContent).toContain("g1-pro-tier");
+  expect(host.querySelector('[title*="g1-pro-tier"]')).toBeTruthy();
   expect(host.textContent).toContain("Gemini");
-  await click(host.querySelectorAll(".pwi-auth-row-main")[1]);
+  await click(host.querySelectorAll(".aqt-account-main")[1]);
   expect(selected).toBe("two");
   expect(requests.find(request => request.url.endsWith("/active"))?.body).toEqual({ provider: "google-antigravity", accountId: "two" });
-  expect(host.querySelectorAll(".pwi-auth-row-main")[1].getAttribute("aria-current")).toBe("true");
-  await click(host.querySelectorAll(".pwi-auth-acct")[1].querySelector('button[aria-label="Pause — two@example.test"]'));
+  const activeAccount = () => host.querySelector<HTMLButtonElement>('.aqt-account-main[aria-current="true"]');
+  expect(activeAccount()).toBeTruthy();
+  const actions = activeAccount()?.closest(".aqt-group");
+  await click([...actions!.querySelectorAll("button")].find(node => node.textContent?.trim() === "Pause"));
   expect(paused).toBe(true);
-  expect((host.querySelectorAll(".pwi-auth-row-main")[1] as HTMLButtonElement).disabled).toBe(true);
+  expect(activeAccount()?.disabled).toBe(true);
   await click(button("Refresh quotas"));
   expect(requests.some(request => request.url.includes("quota=1&refresh=1"))).toBe(true);
 });
@@ -95,17 +97,17 @@ test("failed roster retries and failed quota keeps cards with an unavailable sta
   expect(host.querySelector('[role="alert"]')).toBeTruthy();
   failRoster = false;
   await click(button("Retry"));
-  expect(host.querySelectorAll(".pwi-auth-acct").length).toBe(2);
+  expect(host.querySelectorAll(".aqt-group").length).toBe(2);
   failQuota = true;
   await click(button("Refresh quotas"));
   expect(host.querySelectorAll('[data-quota-state="unavailable"]').length).toBe(2);
-  expect(host.querySelectorAll(".pwi-auth-acct").length).toBe(2);
+  expect(host.querySelectorAll(".aqt-group").length).toBe(2);
 });
 
 test("empty pool can start login only through the existing confirmation dialog", async () => {
   empty = true;
   await mount();
-  expect(host.querySelectorAll(".pwi-auth-acct").length).toBe(0);
+  expect(host.querySelectorAll(".aqt-group").length).toBe(0);
   expect(button("Login")).toBeTruthy();
   await click(button("Login"));
   expect(host.querySelector("dialog")).toBeTruthy();

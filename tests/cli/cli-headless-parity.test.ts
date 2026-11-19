@@ -11,7 +11,7 @@ import { handleClientIntegrationCommand, handleGrokCommand, handleClaudeIntercep
 import { handleModelsRuntimeCommand } from "../../src/cli/models-runtime";
 import { handleProviderRuntimeCommand } from "../../src/cli/provider-runtime";
 import { providerQuotaLine } from "../../src/cli/account-extended";
-import { formatAccountTable } from "../../src/cli/account";
+import { cmdAccount, formatAccountTable } from "../../src/cli/account";
 import { handleConnectCommand } from "../../src/cli/connect";
 import { CAPABILITIES, capabilityInvocation } from "../../src/cli/capabilities";
 import { codexRestartLines, handleSystemCommand } from "../../src/cli/system-command";
@@ -540,6 +540,7 @@ describe("headless GUI parity CLI", () => {
       // for. Listed here so the parity sweep stays exhaustive rather than silently
       // skipping the endpoint.
       ["/api/github/star", "(none — GUI-only)"],
+      ["/api/oauth/accounts/probe", "ocx account probe"],
       ["/api/oauth", "ocx account"],
       // The unified pool-settings route (#695 wp5c). One path answers for every pool
       // kind, and `ocx account strategy` / `ocx account sticky` / `ocx account auto-switch`
@@ -552,10 +553,14 @@ describe("headless GUI parity CLI", () => {
       ["/api/provider-", "ocx provider/models"],
       ["/api/selected-models", "ocx models"],
       ["/api/custom-models", "ocx models"],
+      ["/api/model-discovery/refresh", "ocx models discover"],
       ["/api/model", "ocx models"],
       ["/api/combos", "ocx combo"],
       ["/api/client-config", "ocx export"],
       ["/api/client-integrations", "ocx integration client"],
+      // Antigravity app and agy CLI: status, connect and disconnect are
+      // `ocx connect antigravity|agy [status]` and `ocx disconnect antigravity|agy`.
+      ["/api/gateway-clients", "ocx connect/disconnect antigravity|agy"],
       ["/api/codex-agent-roles", "ocx agent roles"],
       // #2463: both read and write reach the CLI. `ocx alias list` reads /api/aliases,
       // `ocx alias defaults` writes /api/default-aliases, and the per-provider writes sit
@@ -601,6 +606,7 @@ describe("headless GUI parity CLI", () => {
       // inventory and writes one config key. There is no headless equivalent
       // today, and claiming one would be worse than saying so here.
       ["/api/codex-prompt", "(none — GUI prompt-layer surface; keys live in config.toml)"],
+      ["/api/combo-suggestions", "(none — Combos suggestions require a dashboard session)"],
       // Claude reset grants: reading is an owed CLI verb (deferred-verb in the route
       // registry) and spending is dashboard-session-only by design.
       ["/api/anthropic/reset-grants", "(none — GUI reset-grant dialog; spend requires a dashboard session)"],
@@ -636,6 +642,9 @@ describe("headless GUI parity CLI", () => {
       ["/api/subagent", "ocx agent"],
       ["/api/sync", "ocx system sync"],
       ["/api/system", "ocx observe/system"],
+      // Telemetry: status, enable and disable are `ocx telemetry`. The GUI's consent
+      // write (`PUT /api/telemetry`) is dashboard-session-only by design (an agent must not answer).
+      ["/api/telemetry", "ocx telemetry"],
       ["/api/update", "ocx system update"],
       ["/api/usage", "ocx observe usage"],
       // Transient dashboard capture; no durable configuration or CLI verb.
@@ -672,6 +681,35 @@ describe("headless GUI parity CLI", () => {
       method: "PATCH",
       body: { baseUrl: "https://example.test/v1", apiKeyTransport: "bearer", disabled: true, liveModels: true },
     }]);
+  });
+
+  test("account probe routes one alias or the entire Antigravity roster through management", async () => {
+    const body = { provider: "google-antigravity" };
+    const receipt = { provider: body.provider, results: [{ accountId: "acct1", status: "permission_denied", httpStatus: 403, reason: "PERMISSION_DENIED", message: null }] };
+    const runtime = fakeRuntime(req => req.method === "GET" ? { accounts: [{ id: "acct1", alias: "Work" }] } : receipt);
+    const logs = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(await cmdAccount(["probe", body.provider, "work", "--json"], runtime.deps)).toBe(0);
+      expect(JSON.parse(String(logs.mock.calls[0]?.[0]))).toEqual(receipt);
+      expect(await cmdAccount(["probe", body.provider], runtime.deps)).toBe(0);
+      expect(String(logs.mock.calls[1]?.[0])).toContain("HTTP 403 · PERMISSION_DENIED");
+      expect(runtime.requests).toEqual([
+        { method: "GET", path: "/api/oauth/accounts?provider=google-antigravity", body: null },
+        { method: "POST", path: "/api/oauth/accounts/probe", body: { ...body, accountId: "acct1" } },
+        { method: "POST", path: "/api/oauth/accounts/probe", body },
+      ]);
+    } finally { logs.mockRestore(); }
+  });
+
+  test("unsupported providers and ambiguous aliases never send a probe", async () => {
+    const runtime = fakeRuntime(() => ({ accounts: [{ id: "acct1", alias: "work" }, { id: "acct2", alias: "Work" }] }));
+    const errors = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await cmdAccount(["probe", "anthropic"], runtime.deps)).toBe(1);
+      expect(runtime.requests).toEqual([]);
+      expect(await cmdAccount(["probe", "google-antigravity", "work"], runtime.deps)).toBe(1);
+      expect(runtime.requests.map(request => request.method)).toEqual(["GET"]);
+    } finally { errors.mockRestore(); }
   });
 
   test.each(["on", "off"])("provider edit --xai-chat %s shares the GUI wire selector", async value => {
@@ -1567,6 +1605,23 @@ describe("#2565 ocx provider quota renders bars, not a count", () => {
     expect(line).toContain("monthly 0.69%");
     expect(line).toContain("First-party models 0.77%");
     expect(line).toContain("API usage 0.19%");
+  });
+
+  test("a display-only window prints after routed windows with its weekly share, marked not in effect", () => {
+    const line = providerQuotaLine("anthropic", report("anthropic", {
+      weeklyPercent: 91,
+      customWindows: [{ label: "Opus", percent: 10 }],
+      displayWindows: [{ label: "Fable", percent: 4, weeklyAllowancePercent: 50 }, { label: "Opus", percent: 99 }],
+    }) as never);
+    // A routed row with the same label wins, as on the dashboard.
+    expect(line).toBe("anthropic weekly 91% Opus 10% Fable 4% (up to 50% of weekly; not in effect)");
+  });
+
+  test("a weekly share outside (0, 100] is not printed", () => {
+    const line = providerQuotaLine("anthropic", report("anthropic", {
+      displayWindows: [{ label: "Fable", percent: 4, weeklyAllowancePercent: 1e9 }],
+    }) as never);
+    expect(line).toBe("anthropic Fable 4% (not in effect)");
   });
 
   test("a report with no windows still names its provider", () => {

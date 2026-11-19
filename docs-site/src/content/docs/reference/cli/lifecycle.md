@@ -61,7 +61,11 @@ Grok and Claude stay pointed at the proxy that was already running. With a separ
 `OPENCODEX_HOME`, startup checks the default home's runtime record and managed Grok and
 Codex loopback destinations for a live opencodex owner before syncing. A custom home with
 no live owner still syncs normally; explicit `ocx sync` and `ocx grok apply` remain available.
-Stopping that sibling with `ocx stop` or a signal leaves their configuration alone as well. While it runs, the proxy also
+Stopping that sibling with `ocx stop` or a signal leaves their configuration alone as well.
+If the sibling serves a saved Remote Link, `ocx stop` verifies the running instance and its
+Link ownership and stops only that process. Unverified Link ownership or conflicting service
+manager approval leaves the process running and reports an ownership refusal.
+While it runs, the proxy also
 keeps Codex pointed at itself: when the opencodex routing in `~/.codex/config.toml` names another
 local port where no opencodex has answered for about 20 seconds (an instance that re-pointed it and
 then died, for example), the proxy re-points Codex at its own port and prints one warning. Codex
@@ -80,13 +84,35 @@ ocx start --port 10100 --socks5
 ocx start --socks5-off
 ```
 
-### `ocx stop [--json]`
+### `ocx stop [--json] [--deadline-ms <ms>]`
 
-An unsupervised Link Child handling a shutdown signal restores native Codex and managed Grok before releasing its listener, rechecking the served connection before each write. Service/Desktop supervision, sibling ownership, restart/recycle handoff and pending parent stop receipts preserve integrations. Shutdown rejects bound restart with `409 runtime_stopping`. Forced termination can bypass signal handlers; parent `ocx stop` restoration remains necessary. To route Codex through Home again after such a stop, start the Child (`ocx start`, or `ocx service start` for an installed service) and then run `ocx sync --restart-codex`. Starting alone does not reapply routing. A sync run while the Child is stopped still reapplies routing, which points Codex at a listener that is not running, so start the Child first.
+An unsupervised Link Child handling a shutdown signal removes file integrations created by the Link, then restores native Codex and managed Grok before releasing its listener, rechecking the served connection before each write. Pre-existing standalone file integrations and user edits are preserved. During that unsupervised signal cleanup, if file cleanup or native Codex/Grok restoration is refused, including unverified ownership, the listener stays bound with synchronization paused; repair the reported configuration or ownership evidence and retry `ocx stop`. To leave Home after a refused stop, `ocx disconnect --recover-config --yes` completes configuration recovery and restarts the retained Child as standalone OpenCodex. A stop or recovery still in progress continues to refuse restart. Service/Desktop supervision, sibling ownership and restart/recycle handoff preserve integrations. The Child defers native Codex and Grok restoration only when a verified running parent stop owns the matching receipt. File cleanup and its synchronization fence still run before the listener is released. A stale or unreadable receipt alone keeps the listener bound and the recovery evidence intact. Shutdown rejects bound restart with `409 runtime_stopping`.
+
+An explicit `ocx stop` verifies that the running Child still serves the saved Link connection and supports the stop fence, then removes Link-created file integrations before stopping the process or service. If the saved connection is invalid, has changed owners, or file cleanup is refused, the command stops before terminating anything. Repair the saved connection or the reported ownership evidence and retry. The command also refuses before termination if an older recovery record would prevent native restoration; repair the reported evidence and retry. Native Codex/Grok restoration is then attempted by the stopping command after the Child exits. A refusal at that stage reports incomplete restoration and preserves recovery evidence; the listener is already stopped. Forced termination can bypass signal handlers; parent `ocx stop` restoration remains necessary. To route Codex through Home again after such a stop, start the Child (`ocx start`, or `ocx service start` for an installed service) and then run `ocx sync --restart-codex`. Starting alone does not reapply routing. With Home available, sync also reapplies its enabled file integrations. A sync run while the Child is stopped still reapplies routing, which points Codex at a listener that is not running, so start the Child first.
+
+The stopping command must record its recovery receipt before asking a service manager or process to stop. Linux requires kernel pidfd support for direct termination. On macOS, the direct path sends a single SIGTERM. If the direct stop fails, check the Child’s terminal or supervisor for the reason, repair the reported evidence, and retry `ocx stop`.
+
+If a Remote Link Child is still running an older version without the stop fence, such as v2.100.4, the current CLI refuses to stop it. To keep the saved Home connection:
+
+1. Close Codex, Grok and other clients routed through the Child before releasing its port.
+2. Stop the old runtime using its original owner. Press Ctrl+C in its foreground terminal, use Stop and quit its Desktop supervisor, or run `ocx stop` from the **old installation** for a background service, including Windows Task Scheduler.
+3. With the old runtime down, run `ocx stop` from the **current installation**, using the same `OPENCODEX_HOME` and client homes. This completes file-route cleanup and keeps the saved connection. Keep clients closed and resolve any restoration errors before continuing. On Linux this also works without a reachable systemd user manager when the installer unit and service installation records are absent and the known local endpoints are down.
+4. Start the current runtime with `ocx start`, `ocx service start` for an installed service, or the updated Desktop app for a Desktop-managed runtime. Run `ocx sync --restart-codex` once the Child is serving.
 
 Stop the running proxy (by PID), remove the PID file, and restore native Codex for standalone owners. If a managed
 background service is installed, `ocx stop` also stops it first so it cannot respawn the proxy.
-On a connected hub client, `ocx stop` leaves Codex routing, its
+If the listener cannot prove its role, a standalone runtime record can still authorize the ordinary stop
+when its recorded process creation identity matches the live PID and there is no Link evidence.
+An older record without a creation identity requires a same-user OpenCodex start process that owns
+the recorded listener. A wildcard record requires a wildcard listener, and an IPv4 loopback record
+requires an exact loopback listener. On Linux and macOS, the process home and the caller's home
+must resolve to the same directory, including through symlinks. Windows uses the
+owner SID, start arguments, and exact listener ownership because CIM does not expose the process environment.
+The CLI leaves the process running if it cannot establish that match or verify a supervisor.
+If a live tracked PID could still be a Link Child, `ocx stop` leaves it running until it can verify
+its role or tie the PID to a matching service registration. Run `ocx service status` to identify
+its supervisor, or check the foreground terminal. Repair the runtime or saved Link records and retry.
+A native client that cannot prove whether it serves a Link or Hub connection refuses to stop. Update and restart older native clients through their supervisor, then retry. On a connected hub client, `ocx stop` leaves Codex routing, its
 model catalog and the Grok config as they are, including after a successful API stop: the connection
 owns them, and `ocx start` serves them again without re-injecting routing. Use `ocx disconnect` to hand Codex back to its own account. If Codex on a connected
 client already reads native routing, `ocx status` names `ocx sync --restart-codex` to point it back.
@@ -105,7 +131,9 @@ read. Older or unverified runtimes are refused before
 stop actions. Update/restart that runtime through its supervisor and retry; use `ocx disconnect`
 only when you intend to release the connection-owned integrations.
 Repeated stops of an already-stopped client confirm service-manager inactivity and absence at the
-known local endpoints before returning the normal not-running result.
+known local endpoints before returning the normal not-running result. With configured port `0`,
+the recorded runtime port supplies the endpoint; without a concrete recorded endpoint, the stop
+refuses because runtime absence cannot be proved.
 While the OpenCodex desktop app is running, `ocx stop` does not keep the proxy down: the app treats
 it as an unexpected exit and starts a proxy again, within seconds for one it started and after about
 a minute for one it had only attached to. Use the app's tray **Stop proxy** (for a proxy the app
@@ -140,6 +168,58 @@ and is still owed, and 81 when a dashboard update that will restart the proxy ha
 and its catalog to the restarted proxy instead of restoring native Codex. With 81 the proxy is
 down, and the restarted proxy releases the kept teardown after its first sync; if it never starts,
 the next `ocx stop` restores native Codex.
+
+#### Windows service stop
+
+On Windows, `ocx stop` stops a registered Task Scheduler task or native WinSW service with a
+checked stop. It ends the task, then ends only the `wscript.exe` and `cmd.exe` wrapper processes
+it can tie to this installation (this home's launcher or service script, a parent chain that leads
+to the proxy or to the Task Scheduler service, and a recorded start time), and waits for them to
+exit. Only then does it stop the proxy gracefully. Afterwards it confirms that the port stays free
+for about six seconds and that no wrapper started again, so a wrapper's restart loop cannot bring
+the proxy back behind a successful stop.
+
+OpenCodex verifies that the scheduled task launches this installation under your Windows account
+and checks the account for each running instance before stopping it. An owned, disabled task with
+no running instances counts as idle. A queued task prevents OpenCodex from confirming the stop.
+If verification fails, check the launcher and run-as account in Task Scheduler and stop the task
+from its owning session.
+
+OpenCodex terminates a wrapper directly only after verifying that it belongs to your account.
+It ignores wrappers proven to belong to another user. If it cannot verify the owner of a wrapper
+eligible for termination, stop it from its owning Windows session using Task Manager and retry.
+If OpenCodex cannot confirm a wrapper's exit without a process handle, as can happen on ARM64,
+check it in Task Manager from its owning session, stop it if it is still running, and retry.
+
+When the service cannot be proven stopped, `ocx stop` sends no stop request to the proxy, leaves
+your client configuration alone, and fails. With `--json` the summary keeps `outcome: "failed"`
+and `proxy: "unknown"`, and adds `serviceStopReason`:
+
+| `serviceStopReason` | Meaning | What to do |
+|---|---|---|
+| `access-denied` | Ending the task or a wrapper was denied, usually an elevated task stopped from an unelevated terminal | Run `ocx stop` from an elevated terminal |
+| `unbound-wrapper` | A wrapper running this home's service script could not be tied to the service, for example one started by hand | End that `wscript.exe`/`cmd.exe`, then retry |
+| `evidence-unreadable` | The task, wrapper, or service state could not be verified, or the port could not be confirmed free | Follow the stop message or check `ocx service status`, then retry |
+| `unverified-budget` | The time left could not hold a verified stop, so nothing was changed | Retry from a terminal |
+
+If another program is listening on the port after this installation's processes are gone, the
+stop still succeeds and `--json` reports `portHeldByForeign: true`. Both fields are additive and
+no new `outcome` value exists. `serviceStopReason` is omitted when there is nothing to report;
+`portHeldByForeign` appears (`true` or `false`) whenever the port check ran, and is omitted otherwise.
+
+`--deadline-ms <ms>` bounds the whole stop, measured from the moment the command started. Before
+changing anything the stop checks that the time left can hold its worst case (about 57 seconds for
+a registered Task Scheduler service with default settings) and otherwise refuses with
+`unverified-budget`. Without the flag the stop reads `OCX_STOP_DEADLINE_MS` (the desktop app sets
+it) and otherwise uses 60 seconds. macOS and Linux ignore both.
+
+The stop ends the running instance only. The task's logon and unlock triggers stay enabled, so the
+proxy comes back at the next logon or unlock; use `ocx service uninstall` to remove the service.
+`ocx service stop`, `ocx service uninstall`, `ocx uninstall` and `ocx service install` use the
+same checked stop: uninstall and install refuse before deleting or replacing the task when the
+service cannot be proven stopped, and install also stops when another program holds the port. On
+Windows on Arm the wrappers cannot be ended yet, so a stop that would need to end one reports
+`evidence-unreadable`; end the wrapper by hand, then retry.
 
 For a desktop-approved takeover, `ocx stop --json` also accepts the complete set of
 `--expect-*` values supplied by `ocx resolve --json`. On Windows, this guarded stop can
@@ -189,8 +269,11 @@ to start its own replacement on the same port. If the replacement does not answe
 restart budget it is stopped, and the old runtime binds the port again and keeps serving; the
 command then reports the restart as not completed. A client runtime run by a background service or
 the desktop app refuses the request and keeps serving ("Restart not performed; the running client
-runtime was kept"); restart it with `ocx service restart` or from the app. See
-[Remote Link apply parity](#remote-link-apply-parity).
+runtime was kept"); restart it with `ocx service restart` or from the app. A client runtime that
+carries only `OCX_SERVICE=1` (a service installed before 2.49, or a proxy started by `ocx claude`,
+`ocx codex` or `ocx opencode`) cannot show its owner and is always refused, with nothing stopped:
+re-register its service once with `ocx service repair`, or, for a companion's proxy, run `ocx stop`
+and start it again. See [Remote Link apply parity](#remote-link-apply-parity).
 
 If package files or the Bun runtime remain incomplete after the installer exited or failed,
 run `ocx status`, stop any running proxy through its owner (`ocx stop`, or its service or
@@ -518,10 +601,16 @@ warning; the desktop uses `proxy-newer` to keep a takeover from downgrading the 
 Liveness has three answers: `live`, `absent-proven` (every recorded and configured endpoint
 definitively refused or answered non-opencodex), and unknown — a timed-out probe or a listener
 that withholds `/healthz` exits 1 rather than reading as absent, so only `absent-proven` may
-authorise starting a new runtime. The port is the live listener's port when a proxy answers,
+authorise starting a new runtime. One timeout is settled instead: when `hostname` is one of this
+machine's own non-loopback addresses (a Tailscale or LAN IP) and the connect itself times out,
+which Windows does for an unbound local address, resolve tries an exclusive bind on that address
+and port. Only a bind that succeeds counts as absent; a port already in use stays unknown. The port is the live listener's port when a proxy answers,
 otherwise the configured port (default 10100). Exit 0 carries a trustworthy verdict; exit 1 means
 the CLI could not resolve — including an invalid `config.json`, which is never repaired to
-defaults here — and the caller must refuse to guess; any unknown argument exits 64. Discovery uses
+defaults here — and the caller must refuse to guess. With `--json`, exit 1 still prints one
+document, `{"schema":"ocx-resolve/1","ok":false,"reason":…,"error":…}`, where `reason` is
+`config_unreadable`, `config_invalid`, `discovery_failed`, or `liveness_unknown` and `error`
+repeats the stderr message; it has no liveness or port field. Any unknown argument exits 64. Discovery uses
 the same ownership-safe probe budget as `ocx start`, because a false "nothing listening" answer
 is how duplicate proxies happen. The verb is read-only and skips the shim auto-restore preflight.
 
@@ -589,7 +678,7 @@ See [v2 outcomes](/reference/cli/agents/#explicit-v2-target-and-outcome) and
 for target, scope and spending boundaries. A reset-grant status read can contact
 upstream status but never consumes or resumes a grant.
 
-### `ocx sync [--expect-link <linkId> | --expect-hub-key <apiKeyId>] [--local-only] [--json] [--restart-codex] [--restart-app-server-only]` <span id="ocx-sync---restart-codex---restart-app-server-only"></span>
+### `ocx sync [--expect-link <linkId> | --expect-hub-key <apiKeyId>] [--local-only] [--json] [--restart-codex] [--restart-app-server-only] [--child <linkId>]... [--restart-children[=app-server] | --restart-children=codex --yes]` <span id="ocx-sync---restart-codex---restart-app-server-only"></span>
 
 On a Remote Link Home, a successfully committed current catalog is also synced to eligible linked
 Children. `--local-only` disables this fan-out. `--json` prints one `ocx.sync.fanout/1` result with
@@ -599,19 +688,34 @@ and an actionable `hint` in JSON and human output. Update OpenCodex on an older 
 use **Check for Updates** in the signed-in Desktop tray. A link
 mismatch may require re-linking the Child, while an updating Child can be retried after the update.
 The Home's own nonzero exit code is returned unchanged. When the Home exits 0, a connected Child
-skipped during fan-out, a failed or timed-out Child, or an unreadable link store produces exit 6.
-Intentional skips such as client-initiated links and `--local-only` keep their existing exit behavior.
+skipped during fan-out, a failed or timed-out Child, a requested Child restart that did not certainly
+happen, or an unreadable link store produces exit 6. Intentional skips such as client-initiated links,
+`--local-only`, links left out by `--child` (`not-selected`) and Children held by a Child operation
+(`child-busy`) keep their existing exit behavior.
 An unreadable link store produces a path-free error in human output. Exit 7 is reserved
 for an update in flight.
 If the Home sync throws in JSON mode, stdout still contains one result document and stderr gives a
 sanitized failure message.
 
-Fan-out never requests a Codex app or app-server restart on a Child. Use GOAT or run
-`ocx sync --restart-codex` on that Child if a Codex restart is needed. The Child's pinned sync may
-still restart its own OpenCodex client runtime after applying changed Home settings. If the Home
-times out and stops its local SSH process, a remote sync already running may continue on the Child.
+Fan-out requests no Codex restart on a Child unless you pass `--restart-children` (app-servers) or
+`--restart-children=codex --yes` (the Codex desktop app, which ends live conversations and needs a
+signed-in desktop session on that machine). The Home syncs each selected Child first, reads that
+Child's activity again, and only then sends the restart as a second pinned sync. It skips the
+restart, never the sync, for a Child that is relaying a model request at that moment
+(`restart-skipped:link-active`) or whose activity it cannot read (`restart-skipped:activity-unknown`),
+for Windows Children (`restart-skipped:windows`) and for `ocx-child` (`restart-unsupported:ocx-child`),
+and then exits 6. A link whose Child kind is not recorded still receives the restart flag on that
+second sync, which is how the Home learns that it runs `ocx-child`; `ocx-child` ignores the flag. If
+the restart could not be sent, or was sent but its result is unknown, the Child's row reads
+`restart-not-run` or `restart-result-unknown` and the exit is also 6. As with
+`ocx link restart-codex`, this protection is best-effort: a request that starts between that read and
+the restart can still be ended. `--child <linkId>` (repeatable) fans out only to those links; the
+others are reported `not-selected`. A Child busy with a Child operation such as `ocx link update` is
+skipped as `child-busy`. The Child's pinned sync may still restart its own OpenCodex client runtime
+after applying changed Home settings. If the Home times out and stops its local SSH process, a remote
+sync already running may continue on the Child.
 
-If an update is in flight or the shared update/sync mutex cannot be determined, sync changes nothing, reports `update-in-flight`, and exits 7. If another sync holds the mutex, it reports `sync-in-progress` and exits 1; a Home counts that Child as failed and exits 6 when its own sync succeeded. With `--json`, either refusal prints one result document with the Home skipped and the refusal reason in `fanout.reason`.
+If an update is in flight or the shared update/sync mutex cannot be determined, sync changes nothing, reports `update-in-flight`, and exits 7. When a marker left by an interrupted update in OpenCodex 2.100.x or earlier causes the refusal, stderr also names the marker and its recovery; see [Update Failed](/troubleshooting/update-failed/#if-every-update-and-sync-says-update-in-flight). If another sync holds the mutex, it reports `sync-in-progress` and exits 1; a Home counts that Child as failed and exits 6 when its own sync succeeded. With `--json`, either refusal prints one result document with the Home skipped and the refusal reason in `fanout.reason`.
 
 An explicitly requested restart also runs after a successful committed `config.toml` change, even if the catalog and cache bytes are unchanged. A configuration-only no-op, refusal, preflight, or rolled-back write does not trigger it. Without a restart flag, sync never automatically restarts Codex.
 
@@ -822,6 +926,30 @@ On macOS, launchd instead uses the package-local Bun and CLI paths selected duri
 repair. This prevents a mutable PATH shim from receiving the service API token and configured proxy
 environment on a later restart. After upgrading a version-manager installation, run
 `ocx service repair` to refresh those paths before restarting the service.
+
+The macOS agent uses launchd's `Interactive` resource policy because Codex and dashboard requests
+depend on its responsiveness. This avoids the default daemon CPU and I/O throttling under load.
+After upgrading an existing installation, `ocx service repair` applies this policy as well.
+
+If launchd refuses the changed definition and its state can be checked, repair reports failure
+and attempts to restore the previous definition; a job still serving the expected command is left
+running with the previous plist back on disk. A matching command alone cannot confirm the new policy.
+If the initial launchd probe cannot check state, repair refuses before writing a new plist or backup.
+If the probe immediately after bootstrap cannot check state, repair keeps the new plist and any backup without another eviction:
+a refused bootstrap throws, while an accepted bootstrap reports an unverified reload with a warning.
+For an unchanged definition, a successful recovery kickstart followed by an uncheckable probe can still trigger another eviction.
+Inspect the job with `launchctl print gui/$(id -u)/com.opencodex.proxy` before retrying repair.
+An unconfirmed definition remains pending across repairs, including after a token change. Registration
+is retried only when the initial launchd probe is checkable; a GUI login session may be required.
+Repair preserves any original backup successfully created until bootstrap is accepted and the probe
+confirms the matching job. Backup creation is best-effort; a fresh installation has no prior definition.
+Identical disk bytes and command alone cannot make a pending repair a no-op. Fresh installation
+removes orphaned recovery files, and full uninstall removes them even when the plist is absent.
+Fresh-install recovery cleanup, pending-marker removal and uninstall cleanup ignore only already-missing
+files; another error in these steps reports failure without deleting install state. After a verified
+repair has written install state, removing the `.prev` backup is best-effort; failure there does not
+change the repair's reported success.
+
 Launchd restarts the proxy after a crash or failed restart handoff, but leaves it stopped when
 the service deliberately exits cleanly because the desktop app owns the runtime. Run
 `ocx service repair` once to apply this behavior to a service installed by an older version.
@@ -1262,7 +1390,81 @@ and 64 for invalid usage. `rolledBack` is true only when an actual installer
 rollback and its verification succeeded. A plan command emits its plan with exit 0;
 the `canApply` and `reason` fields describe eligibility.
 
-Compiled standalone installs, including the Windows MSI Desktop bundle, are updated through **Check for Updates…** in OpenCodex Desktop, or by reinstalling the standalone binary from [GitHub Releases](https://github.com/lidge-jun/opencodex/releases). `ocx system update check` reports `installer: "standalone"`, `canUpdate: false`, and `reason: "standalone_install"` with that guidance. `ocx update` exits unsuccessfully with the same hint; it does not run a package-manager update for the compiled executable. A genuine source checkout still reports `installer: "source"` and `reason: "source_checkout"`.
+Compiled standalone installs, including the Windows MSI Desktop bundle, are updated through **Check for Updates…** in OpenCodex Desktop, by `ocx update --desktop` on a Windows Desktop installation (below), or by reinstalling the standalone binary from [GitHub Releases](https://github.com/lidge-jun/opencodex/releases). `ocx system update check` reports `installer: "standalone"`, `canUpdate: false`, and `reason: "standalone_install"` with that guidance. `ocx update` without `--desktop` exits unsuccessfully with the same hint; it does not run a package-manager update for the compiled executable. A genuine source checkout still reports `installer: "source"` and `reason: "source_checkout"`.
+
+If your host already uses an external updater, such as a systemd timer that deploys
+and switches versioned source trees under `/opt/opencodex/releases/`, set
+`OCX_MANAGED_RELEASE=1` in the proxy service environment and start the proxy through
+the `ocx` Node launcher from the active release. For example, configure the service
+to run `node /opt/opencodex/current/bin/ocx.mjs start` and have the updater restart
+the service after switching the `current` link. The launcher captures the setting
+before Bun starts. A project `.env` cannot enable this mode.
+The host operator supplies the updater and its release directories. The directory
+name alone does not enable this mode, and the environment variable does not install
+or schedule an updater.
+
+The dashboard and `ocx system update check` can then compare the installed version
+with the selected npm channel. A successful lookup reports
+`installer: "source"`, `canUpdate: false`, and `reason: "managed_release"`
+without a `git pull` hint. If npm cannot supply the latest version, the check
+reports `reason: "latest_unavailable"` and the dashboard offers a retry.
+
+#### Headless Windows Desktop update
+
+```bash
+ocx update --desktop [--check] [--json]
+```
+
+Run this with the Windows Desktop installation's own `ocx.exe` (the one beside
+`opencodex-desktop.exe`), from an elevated terminal or SSH session signed in as the account that
+runs the proxy. The command finds the proxy through that account's OpenCodex home: a service, a
+SYSTEM scheduled task or another administrator account has a different home, does not find it,
+and would install the update but leave the old proxy serving. Any other `ocx`
+exits 64 without changing anything. It reads the release feed the app's updater uses and, when
+a newer version is published:
+
+1. downloads the Windows MSI from the exact GitHub release asset over HTTPS (at most three
+   redirects to GitHub's release-asset hosts, a 1 GiB cap, and connect, idle and total
+   deadlines), sending no credentials;
+2. verifies it with the app updater's embedded public key, refusing a bad or missing signature,
+   a signature for another version or platform, or a file that is not an MSI. It saves the MSI
+   and its log in a new folder (from an elevated session, under `%SystemRoot%\Temp` with access
+   for SYSTEM and Administrators only, so no program without those rights can replace the file
+   before the installer opens it) and verifies the saved copy again;
+3. renames its own running `ocx.exe` aside within the installation folder and puts a copy back
+   under the installed name, so the installer does not have to close the command that started it
+   and an interrupted command leaves nothing to put back (Windows Installer finishes or rolls back
+   on its own), runs
+   `msiexec /i <msi> /qn /norestart /l*v <log>` and waits for its exit code (0 and 3010 are
+   success; 3010 means Windows must restart to replace files that were in use). After a failed
+   install the folder keeps the previous `ocx.exe` and the log; an installer still running after
+   15 minutes is left alone with its staging folder;
+4. checks that the installed `ocx.exe` reports the new version, and only then schedules the
+   moved file for deletion at the next restart (each run also removes earlier leftovers);
+5. restarts the proxy that still serves the old version through its own in-place restart, so
+   Desktop, the service, or the detached proxy starts the installed executable, and waits until
+   the new version answers `/healthz`. A connected client proxy keeps itself through that
+   restart: when its background service owns it, the installed `ocx service restart` replaces it;
+   when the check proves this installation's OpenCodex Desktop runs exactly that proxy, the
+   installed `ocx stop --json` stops it, as the app's own updater does, and the app starts the new
+   version after a few seconds.
+
+A proxy whose executable is not this installation's `ocx.exe`, one this home cannot attest,
+or one newer than the installation is never stopped. When no proxy for this home was found, none is
+started (`installed-stopped`). With nothing newer published, the command still restarts an old proxy left behind by an
+earlier MSI install. `--check` reports the published, installed and serving versions without
+downloading or restarting anything.
+
+Exit codes: 0 updated, already current, or installed when no proxy for this home was found; 1 nothing was
+installed (refused signature, download failure, or a Windows Installer failure, whose log path
+is printed); 2 installed, but the old proxy is still serving or Windows must restart first;
+3 the installer did not finish within 15 minutes, or reported success without installing the
+new version; 64 invalid usage or not a Windows Desktop installation. `--json` prints one
+`ocx.desktop.headless-update/1` object with `outcome`, `exitCode`, `installedVersion`,
+`targetVersion`, `runtime`, `installer`, `reason` and `message`.
+
+When `ocx status` on a Windows Desktop installation sees an installed version newer than the
+running proxy, its version warning names both versions and prints this command.
 
 When OpenCodex is installed through mise, this command exits unsuccessfully before stopping the proxy or changing package files and shows `mise upgrade <tool>`, using the verified local mise alias. Update checks remain available and report the installation as externally managed. An unreadable or inconsistent mise ownership record fails closed without guessing a tool name, and `--tag preview` never changes mise's configured selection.
 
@@ -1363,6 +1565,57 @@ starts and then once a minute; the Home keeps reports in memory only, so after a
 fields read `null` until the next report. A Child whose runtime started before `lastApplyAt` is
 running an older runtime than its last apply.
 
+With a Home and CLI that support it, each row also carries a `child` block: the Child's running and
+installed versions, its version skew against the Home, its update route, whether it last downloaded the
+Home's current catalog, whether a relayed model request is running, and the last operation. Installed
+version and update route come from `ocx link check (--link-id <id> | --all) [--no-wait] [--json]`, which
+runs the Child's `ocx update --plan` over SSH for each Home-initiated link (60 seconds per Child, three at
+a time) and changes no install. A POSIX Child older than 2.97.0 gets one more read-only SSH call for its
+version; a Windows Child that old reports the version it sent over the link. The fields are described in
+[Home and Child versions](/guides/remote-link/#child-install-catalog-and-activity).
+
+Lightweight `ocx-child` Child hosts run `ocx-child sync [--expect-link <id>] [--json]`, `ocx-child status [--json]` (while `ocx link status --json` remains on the Home), and `ocx-child disconnect` / `ocx-child detach`: on an attached `ocx-child` host (which runs without a system service manager), a successful `ocx-child sync` starts `ocx-child serve` if no relay is running even when settings are unchanged, rolls it over when `runtimeStartedAt < lastApplyAt`, and posts a best-effort parity report on non-stale syncs. `ocx-child sync` accepts `--restart-codex` / `--restart-app-server-only` for flag compatibility without restarting Codex processes (restart the Codex desktop app and long-lived `app-server` processes separately if needed), and `ocx-child disconnect` / `ocx-child detach` restores `~/.codex` files offline and stops `ocx-child serve` with zero background daemon left running. Only one `ocx-child` install may manage a given `CODEX_HOME` at a time: lifecycle commands lock `CODEX_HOME/.ocx-child.lock` (kept permanently) and record the owning `OPENCODEX_HOME` in `CODEX_HOME/.ocx-child-owner.json` until `ocx-child detach` completes, so an `ocx-child attach` or `sync` from a different `OPENCODEX_HOME` sharing that `CODEX_HOME` exits nonzero without changing any file and names the owning home to detach first.
+
+## Child operations from the Home
+
+```text
+ocx link update (--link-id <id> | --all) --yes [--no-wait] [--json]
+ocx link sync (--link-id <id> | --all) [--no-wait] [--json]
+ocx link sync --link-id <id> (--restart-app-server-only | --restart-codex --yes) [--no-wait] [--json]
+ocx link restart-codex --link-id <id> [--scope app-server|codex] --yes [--no-wait] [--json]
+```
+
+These commands start one job on the Home for Home-initiated Children and print it as an `ocx.link.child-job/1` document: `{schema, jobId, op, trigger, restart, state, createdAt, finishedAt, items}`. Each item carries `linkId`, `alias`, `state`, `reason`, `startedAt` and `finishedAt`, and where they apply `hint`, `fromVersion`, `toVersion`, `sync` (`{state, reason}`) and `restart` (`{requested, outcome}`, where `outcome` is `requested`, `unsupported`, `not-run` or `skipped`). What each command runs on the Child, the version floors and the Windows and `ocx-child` limits are in [Operating Children from the Home](/guides/remote-link/#operating-children-from-the-home). A restart names exactly one link; `update`, `restart-codex` and `--restart-codex` need `--yes`.
+
+| Exit | Meaning |
+|---|---|
+| 0 | every item `succeeded` or is `up-to-date`, and every requested restart went out; with `--no-wait`, the job was accepted and may still be running (read it again for the result) |
+| 6 | an item is `busy`, `offline`, `refused`, `owner-action` or `unsupported`, or succeeded with a reason such as `restart-skipped:link-active` or `post-update-sync-failed` |
+| 1 | an item `failed` or is `uncertain`, an item state this CLI does not know, the job did not finish within its wait, or a Home not bound to loopback |
+| 2 | invalid arguments, for example a restart with `--all` or `update` without `--yes` |
+| 4 | an unknown link, or a Home without Child operations |
+| 5 | another operation holds the link, the only link named was started from the Child, the Home has no links, or the command ran on a Child; the error message names which |
+
+The wait does not count time an item spends queued behind another job. Removing a link while a job holds it answers `409 link_operation_in_progress`.
+
+## Child policy from the Home
+
+```text
+ocx link policy [--updates off|notify|auto-when-idle] [--catalog-fanout auto|manual] [--child-codex-restart never|app-server-when-idle] [--idle-after-minutes <1-60>] [--json]
+```
+
+`ocx link policy` starts no job and prints no `ocx.link.child-job/1` document. It reads the Home's Child policy and, with flags, changes only the settings named: `--catalog-fanout auto|manual`, `--child-codex-restart never|app-server-when-idle`, `--updates off|notify|auto-when-idle` and `--idle-after-minutes <1-60>`. It prints one line per setting, or `{policy, warning}` with `--json`; `warning` is `policy-file-invalid` when the file is damaged, and automatic catalog fan-out and updates stay off; a save keeps every setting it does not name off, so pass `--catalog-fanout auto` and an `--updates` mode to turn them back on. Catalog fan-out is on by default: after a Home catalog change the Home syncs eligible Children over SSH on its own. See [Automatic catalog fan-out and the Child policy](/guides/remote-link/#automatic-catalog-fan-out-and-the-child-policy). Exit codes: 0 on success, 2 for invalid arguments, 4 for a Home without this command, 5 for a conflict answer (`runtime_role_client` from a runtime that is a Child), and 1 for a Home not bound to loopback, an invalid answer, or a run on a Remote Link Child, which refuses the request before sending it.
+
+## Remote Link SSH capture
+
+```text
+ocx link capture start [--minutes <1-60>] [--json]
+ocx link capture stop [--json]
+ocx link capture status [--json]
+```
+
+These commands manage a short local window, 15 minutes by default and 60 at most, in which this machine's Remote Link tunnels run SSH with `LogLevel=DEBUG1` and store a sanitized copy of what SSH reports under `<OPENCODEX_HOME>/link/ssh-capture/`. They run on a Home or a Child, need no running proxy or admin token, and print the capture status: `{enabled, logLevel, startedAt, expiresAt, directory, retentionHours, maxMinutes, maxFileBytes, files, removed}`. `stop` ends the window and keeps the files; `status` and `start` delete files 72 hours after their last write and report how many they removed. What is stored and how it is redacted is in [Capture SSH diagnostics](/guides/remote-link/#capture-ssh-diagnostics). Invalid arguments exit 2.
+
 ## Remote Link Child attestations
 
 A peer that sends work through a Remote Link Child can check two more facts in the Child's
@@ -1385,12 +1638,18 @@ is one of `auth`, `hostkey`, `forward`, `remote_forward_conflict`, `timeout`, `n
 empty after a Home restart. `GET /api/link/status` includes the field only when asked with
 `?diagnostics=1`, because an older `ocx link status` rejects fields it does not know.
 
+That history survives a restart only in the bounded diagnostics file.
+`ocx link diagnostics [--limit <n>] [--since <iso-time|epoch-ms>] [--json]` reads it on the
+computer that wrote it, Home or Child, without a running proxy and without writing anything; see
+[Remote Link](/guides/remote-link/#retryable-503-diagnostics).
+
 After `ocx sync` applies the Home's settings on a Child, it restarts the Child's client runtime when
 that runtime started before `lastApplyAt`, using the same restart as `ocx restart`. A runtime that
-already started after the apply is left alone, nothing is started when no client runtime is
-running, and a failed restart exits nonzero while the previous runtime keeps serving; run
-`ocx sync` or `ocx restart` again to retry. Two applies on one Child never interleave: a second
-`ocx sync` while one is applying fails fast and changes nothing.
+already started after the apply is left alone, on a full `ocx` Child nothing is started when no client runtime is
+running (unlike an attached `ocx-child`, which starts `ocx-child serve` when absent), and on a full `ocx` Child a failed restart exits nonzero while the previous runtime keeps serving (whereas on `ocx-child`, rollover stops the prior `ocx-child serve` before binding the replacement, so a failed rollover exits nonzero with no relay running until `ocx-child sync` or `ocx-child restart` retries). Two applies on one Child never interleave. On a full `ocx` Child, a second `ocx sync` while one is
+applying fails fast and changes nothing. On `ocx-child`, a second `ocx-child sync --expect-link <id>`
+(the form the Home's sync fan-out runs) exits `5` with reason `pending_operation` and changes
+nothing, while a plain `ocx-child sync` waits for the first apply to finish and then runs.
 
 ## Forced link revoke and remote recovery
 
@@ -1405,8 +1664,59 @@ ocx link revoke --link-id lnk_0123456789abcdef --force --yes --json
 A forced success returns `{linkId,remoteCleanup:"skipped",recovery}`. Idempotent
 link-not-found instead reports `remoteCleanup:"unverified"`. Both can exit 0;
 these facts derive from CLI intent, not a server cleanup report. Neither means
-remote disconnect was attempted or confirmed. Follow the recovery instruction,
-`ocx disconnect` on the remote client, when that action is authorized.
+remote disconnect was attempted or confirmed. Follow the recovery instruction when
+that action is authorized: on a full Child, run `ocx disconnect --expect-link <id>`
+there, which acts only while the machine is connected to this link. An OpenCodex
+older than that flag refuses it as a usage error before it acts on the link; then
+run `ocx disconnect` only if `ocx connect status --json` shows this link's id or no
+connection, right after that check (an enrollment that lands between the two
+commands would be removed), and leave it if it shows another link, a hub or
+another Home, or its state cannot be read. A lightweight Child uses
+`ocx link recover` (below). A link saved before the Home recorded the Child type
+keeps no tombstone, so the instruction names both installs' link-bound commands.
+
+A forced revoke of a lightweight (`ocx-child`) Child that the Home reached over
+SSH leaves a tombstone on the Home naming the link, its alias and its pinned host
+key; the recovery instruction then names `ocx link recover`. Once that machine
+answers again, run:
+
+```bash
+ocx link recover --link-id lnk_0123456789abcdef --json
+```
+
+The Home connects over the link's alias with the host key it recorded (a changed
+key refuses with `host_key_changed` before connecting) and runs the planted
+binary's `disconnect --purge --expect-link <id>`. The Child restores its
+`~/.codex` files and removes the planted binary only when its records name that
+link and no other: its state and its ownership record both name it, or an
+interrupted detach or attach of that link left the ownership record naming it
+without the state (any attach rollback left, including one a detach stopped
+while restoring, may name no link or that link, never another). Success prints
+`{linkId,outcome:"clean",purged:true}` and removes the tombstone; `purged:false`
+means the Child restored its state but kept the planted binary because another
+OpenCodex home on that machine runs a relay from it, and the tombstone is removed
+too. `child_residual`
+(exit 5) means the Child keeps records this command does not restore, such as an
+ownership record written by an older `ocx-child` or an interrupted attach of
+another link, and nothing was changed. Do not run a plain `ocx-child detach`
+there: it would also restore and remove a link that interrupted attach left. For
+a machine that is gone or whose cleanup cannot be proven, a person on the Home
+can run `ocx link recover --forget --link-id <id> --yes`.
+`child_conflict` (exit 5) means the Child belongs to another link or OpenCodex
+home, and nothing was changed. `alias_linked` (exit 5) means another Home-initiated link still uses that
+alias, as its alias or one of its routes, so the machine may belong to that link: do not run
+`ocx-child detach` there. Leave that link: no status check on the machine can show it is stale,
+since an attach of it still in progress can show no link or an earlier one, and state that cannot be read
+shows none. The tombstone waits until that link is removed; then run recover again. Revoking that link (after
+settling any open operation on it) ends it and disconnects the machine if the machine runs it, so do that
+only if you mean to end that link. A person on the Home can instead forget the tombstone once the machine
+is confirmed clean or gone.
+`link_present` (exit 5) means the link itself still exists; revoke it instead (with `--purge` for a lightweight Child).
+`--operation-id` recovers a Child that an
+interrupted enrollment left behind; it needs the link operation journal and
+otherwise answers `operation_journal_unavailable`.
+Automation can discover support with `ocx capabilities --contracts --json`: the
+`contracts` array contains `link.recover/1`.
 
 ## Observe Remote Workspace from the Hub
 
@@ -1426,6 +1736,8 @@ See [Hub observation and recovery](/guides/remote-workspace/#inspect-the-hub-wit
 ## Remote Hub client lifecycle
 
 Use `ocx connect <url> --pairing-code-stdin`, `ocx connect status`, `ocx sync`, and `ocx connect rotate --pairing-code-stdin`. The initial catalog download fails after five seconds without incoming bytes, but active transfers may run longer; use `--catalog-timeout <seconds>` (1–120) to override that inactivity window. `ocx disconnect` restores local state offline and does not revoke the hub key. While connected only, `ocx connect revoke --admin-token-stdin` revokes the persisted `apiKeyId`; after disconnect use the hub's **Connect → API Keys** page. Secrets are stdin-only and never belong in argv.
+
+On a Remote Link Child, `ocx connect status` also prints a `Link tunnel:` line (`up`, `down (<reason>)` or `unknown (<reason>)`) read from the running Child's `/readyz`, and `--json` adds `linkTunnel`. `Connection: connected` still means only that the machine is linked; see the [Remote Link guide](/guides/remote-link/).
 
 ## Setup port validation
 

@@ -69,6 +69,11 @@ const vertex = (apiKey: string, extra: Partial<OcxProviderConfig> = {}) => ({
 }) as OcxProviderConfig;
 
 describe("vertex project auto", () => {
+  test("a refused selection prevents the auxiliary project probe", async () => {
+    await expect(createGoogleAdapter(vertex("key-a")).buildRequest(parsed(), incoming({ beforePhysicalSend: () => { throw new Error("selection changed"); } })))
+      .rejects.toThrow("selection changed");
+    expect(probes).toEqual([]);
+  });
   test("parses the project number from Google's projectless NOT_FOUND body", () => {
     expect(parseVertexProbeProjectNumber(notFound("22932377871"))).toBe("22932377871");
     expect(parseVertexProbeProjectNumber("projects/my-project/locations/global")).toBeUndefined();
@@ -91,7 +96,8 @@ describe("vertex project auto", () => {
   test("honors an explicit regional location", async () => {
     const req = await createGoogleAdapter(vertex("key-a", { location: "us" }))
       .buildRequest({ ...parsed(), stream: false } as OcxParsedRequest, incoming());
-    expect(req.url).toBe("https://us-aiplatform.googleapis.com/v1/projects/111111111111/locations/us/publishers/google/models/gemini-4-argon:generateContent");
+    // The us multi-region uses its regional-endpoint (rep) host.
+    expect(req.url).toBe("https://aiplatform.us.rep.googleapis.com/v1/projects/111111111111/locations/us/publishers/google/models/gemini-4-argon:generateContent");
   });
 
   test("probes once per key, including concurrent first requests", async () => {

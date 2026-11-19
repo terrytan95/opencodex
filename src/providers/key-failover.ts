@@ -9,9 +9,15 @@
  * Modelled after src/codex/routing.ts cooldown logic but scoped to plain API-key pools.
  */
 import { isKeyInCooldown, getKeyCooldownUntil, setKeyCooldown } from "./api-key-cooldowns";
-export { clearKeyCooldowns, getKeyCooldownUntil, sweepExpiredApiKeyCooldowns } from "./api-key-cooldowns";
-import { commitProviderApiKeySelection, providerApiKeySelectionIsCurrent } from "./api-key-selection";
-import { RequestPacingQueueOverloadError } from "./request-pacing";
+export {
+  clearKeyCooldowns,
+  getKeyCooldownUntil,
+  sweepExpiredApiKeyCooldowns,
+} from "./api-key-cooldowns";
+import { affinitySelectionIsCurrent, commitProviderApiKeySelection, providerApiKeySelectionIsCurrent } from "./api-key-selection";
+import { currentCacheAffinityIdentity } from "./cache-affinity-identity";
+import { providerRequestPacingStatus, REQUEST_PACING_MAX_QUEUE_AGE_MS, RequestPacingQueueOverloadError } from "./request-pacing";
+import { isCanonicalOpenAiForwardProvider } from "./openai-tiers-destination";
 import { isCanonicalMistralChat } from "./mistral-transport";
 import type { ProviderApiKeySelection } from "../types/provider";
 import { routedProviderConfig } from "./routed-config";
@@ -21,10 +27,13 @@ import type { OcxConfig, OcxProviderConfig, RateLimitRetryPolicy, ResetReplayPol
 import { OPENCODE_GO_SESSION_HEADER } from "./opencode-go-transport";
 import { resolveProviderTransport, type OcxProviderTransport } from "./xai-transport";
 import { sweepExpiredOnWrite } from "../lib/state-store-sweeper";
+import { cacheAffinityApplies, consultProviderCacheAffinity, releaseProviderCacheAffinity } from "./cache-affinity";
+import { ProviderApiKeyPausedError } from "./api-key-pause-state";
 // quota-key-accounts imports only node:crypto, the key store and the quota types -- NOT
 // providers/quota.ts -- so the cached reader reaches the dispatch path without dragging the
 // probe machinery onto it.
 import { cachedApiKeyQuota } from "./quota-key-accounts";
+import { isDisplayOnlyQuota } from "./quota-types";
 
 // ---- cooldown state (in-memory, same as codex/routing.ts) ----
 
@@ -422,7 +431,7 @@ type ApiKeyPoolEntry = NonNullable<OcxProviderConfig["apiKeyPool"]>[number];
  */
 function keyHeadroom(providerName: string, provider: OcxProviderConfig, entry: ApiKeyPoolEntry): number | null {
   const quota = cachedApiKeyQuota(providerName, provider, entry.id, entry.key);
-  if (!quota) return null;
+  if (!quota || isDisplayOnlyQuota(quota)) return null;
   const percents = [
     quota.fiveHourPercent,
     quota.weeklyPercent,
@@ -459,7 +468,6 @@ function rankKeysByHeadroom(
     .map(row => row.entry);
 }
 
-
 /**
  * Pick a better key BEFORE the first attempt when the committed one is already cooling.
  *
@@ -487,12 +495,14 @@ export function selectProactiveApiKey(
 ): OcxProviderConfig | null {
   const provider = config.providers?.[providerName];
   if (!provider) return null;
-  const strategy = provider.apiKeyPoolStrategy;
-  if (!strategy) return null;
   if (!hasKeyPoolFailover(provider)) return null;
   const pool = provider.apiKeyPool ?? [];
 
-  const activeEntry = pool.find(entry => entry.key === provider.apiKey);
+  const activeEntry = pool.find(entry => entry.key === provider.apiKey && !entry.disabled)
+    ?? pool.find(entry => entry.key === provider.apiKey);
+  const activeDisabled = Boolean(activeEntry?.disabled || (!provider.apiKey && pool.some(entry => entry.disabled)));
+  const strategy = provider.apiKeyPoolStrategy ?? (activeDisabled ? "fill-first" : undefined);
+  if (!strategy) return null;
   // A healthy committed key wins, whether the operator chose it or a previous rotation did.
   if (activeEntry && !activeEntry.disabled && !isKeyInCooldown(providerName, activeEntry.id, now)) return null;
 
@@ -521,7 +531,8 @@ export function selectProactiveApiKey(
     const target = freshPool.find(entry => entry.id === chosen.id);
     if (!target || target.disabled) return { changed: false, value: null };
     if (freshProvider.apiKey === target.key) return { changed: false, value: null };
-    const freshActive = freshPool.find(entry => entry.key === freshProvider.apiKey);
+    const freshActive = freshPool.find(entry => entry.key === freshProvider.apiKey && !entry.disabled)
+      ?? freshPool.find(entry => entry.key === freshProvider.apiKey);
     // Re-check under the lock: a concurrent manual selection may have landed a healthy key.
     if (freshActive && !freshActive.disabled && !isKeyInCooldown(providerName, freshActive.id, now)) {
       return { changed: false, value: null };
@@ -535,6 +546,49 @@ export function selectProactiveApiKey(
   const committed = structuredClone(outcome.provider);
   config.providers[providerName] = committed;
   return structuredClone(committed);
+}
+
+/** Conversation context for the cache-affinity preference inside proactive selection. */
+export interface ProactiveKeyAffinityContext {
+  /** Explicit session lane of the request; absent lanes never bind or consult. */
+  lane?: string;
+  model?: string;
+  /** The request continues the lane's in-progress turn (tool results being returned). */
+  continuation?: boolean;
+  /** Decision sink (the request log context); only bounded enum strings are written. */
+  log?: {
+    cacheAffinity?: string;
+    cacheAffinityReason?: string;
+    cacheAffinityApplicable?: boolean;
+    affinityModel?: string;
+    affinityKeptEntryId?: string;
+  };
+}
+
+/**
+ * Whether the bound entry is pacing-limited right now: its per-key
+ * concurrency bucket is full, or its next permitted start (minimum interval
+ * or per-minute cap, as the pacer computes it) is further out than the send
+ * queue tolerates before expiring a waiter. Below that bound, queueing is
+ * pacing working as designed — ordinary selection queues too — so affinity
+ * stands. Only the provider-level keys rule is consulted here; per-model
+ * caps still apply at the send queue exactly as they do for ordinary
+ * selection.
+ */
+function affinityPacingSaturated(
+  providerName: string,
+  configured: OcxProviderConfig,
+  entryId: string,
+  now: number,
+): boolean {
+  const pacing = configured.requestPacing;
+  if (!pacing?.enabled) return false;
+  const key = providerRequestPacingStatus(providerName, configured, now).keys
+    ?.find(candidate => candidate.id === entryId);
+  if (!key) return false;
+  if (key.nextSlotInMs > REQUEST_PACING_MAX_QUEUE_AGE_MS) return true;
+  const cap = pacing.keys?.maxConcurrentRequests;
+  return cap !== undefined && cap > 0 && key.inFlight >= cap;
 }
 
 /**
@@ -552,11 +606,76 @@ export function selectProactiveApiKeyTransport(
   routedProvider: OcxProviderTransport,
   promptCacheKey?: string,
   now = Date.now(),
+  affinity?: ProactiveKeyAffinityContext,
 ): OcxProviderTransport | null {
   const configured = config.providers[providerName];
-  if (configured?.requestPacing?.enabled && configured.requestPacing.keySelection === "round-robin"
-    && hasKeyPoolFailover(configured)) {
-    return applyRotatedTransport(providerName, routedProvider, allocateDistributedKey(providerName, configured, now), promptCacheKey);
+  // Cache affinity first: a conversation stays on the credential whose upstream
+  // prompt cache it built, while that credential is still eligible. The
+  // preference never commits a global selection — it rebuilds this request's
+  // transport only — and it yields to every eligibility rule the normal paths
+  // enforce (entry removed or disabled releases the binding; a cooling or
+  // pacing-saturated entry falls through to ordinary selection, and whoever
+  // ultimately serves is who the binding is refreshed to at finalization).
+  if (affinity?.lane && configured) {
+    if (affinity.log) {
+      affinity.log.cacheAffinityApplicable = cacheAffinityApplies(configured);
+      affinity.log.affinityModel = affinity.model;
+    }
+    const hit = consultProviderCacheAffinity({
+      lane: affinity.lane,
+      providerName,
+      provider: configured,
+      model: affinity.model ?? "",
+      continuation: affinity.continuation === true,
+      now,
+    });
+    if (hit) {
+      const entry = configured.apiKeyPool?.find((candidate) => candidate.id === hit.entryId);
+      if (!entry || entry.disabled) {
+        releaseProviderCacheAffinity(affinity.lane, providerName, hit.entryId);
+      } else if (
+        !isKeyInCooldown(providerName, entry.id, now) &&
+        !affinityPacingSaturated(providerName, configured, entry.id, now) &&
+        !(configured.apiKeyPoolStrategy === "quota" &&
+          (keyHeadroom(providerName, configured, entry) ?? 1) <= 0 &&
+          configured.apiKeyPool?.some(candidate => !candidate.disabled &&
+            !isKeyInCooldown(providerName, candidate.id, now) &&
+            (keyHeadroom(providerName, configured, candidate) ?? 0) > 0))
+      ) {
+        if (affinity.log) {
+          affinity.log.cacheAffinity = "kept";
+          affinity.log.cacheAffinityReason = hit.reason;
+          affinity.log.affinityKeptEntryId = entry.id;
+        }
+        const affinityTransport = applyRotatedTransport(
+          providerName,
+          routedProvider,
+          { ...configured, apiKey: entry.key },
+          promptCacheKey,
+        );
+        // Mark the pick as request-local affinity so selection re-reads keep it
+        // while the entry stays live, without committing a global selection.
+        affinityTransport._apiKeyAttempt = {
+          ...affinityTransport._apiKeyAttempt!,
+          cacheAffinity: true,
+          cacheAffinityGeneration: currentCacheAffinityIdentity(providerName, configured, entry.id),
+          distributed: configured.requestPacing?.enabled === true && configured.requestPacing.keySelection === "round-robin",
+        };
+        return affinityTransport;
+      }
+    }
+  }
+  if (
+    configured?.requestPacing?.enabled &&
+    configured.requestPacing.keySelection === "round-robin" &&
+    hasKeyPoolFailover(configured)
+  ) {
+    return applyRotatedTransport(
+      providerName,
+      routedProvider,
+      allocateDistributedKey(providerName, configured, now),
+      promptCacheKey,
+    );
   }
   const committed = selectProactiveApiKey(config, providerName, now);
   if (!committed) return null;
@@ -566,6 +685,7 @@ export function selectProactiveApiKeyTransport(
 const dispatchKeyCursor = new Map<string, string>();
 function allocateDistributedKey(providerName: string, provider: OcxProviderConfig, now: number): OcxProviderConfig {
   const pool = (provider.apiKeyPool ?? []).filter(entry => !entry.disabled).filter((entry, index, all) => all.findIndex(other => other.key === entry.key) === index);
+  if (pool.length === 0) throw new ProviderApiKeyPausedError();
   const previous = dispatchKeyCursor.get(providerName);
   const start = pool.findIndex(entry => entry.id === previous);
   for (let offset = 1; offset <= pool.length; offset++) {
@@ -630,30 +750,24 @@ export function rateLimitRetryPolicyFor(
   return null;
 }
 
-/**
- * Normalize a provider's `transientRetryOn5xx` policy, or return null when it is absent,
- * explicitly disabled, not key-auth, or not an adapter this policy governs.
- *
- * The adapter gate is part of the accepted scope, not incidental: it names the adapters whose
- * lanes actually read this policy, so no generic key-auth adapter can opt in by accident.
- * Auth mode follows the same fail-closed rule as `rateLimitRetryPolicyFor` —
- * explicit `key` or the documented omitted default, never OAuth, forward, local, or an
- * unknown value.
- */
-export function transientRetryPolicyFor(
-  provider: Pick<OcxProviderConfig, "transientRetryOn5xx" | "authMode" | "adapter">,
-): Required<TransientRetryPolicy> | null {
+/** Configured total sends for key-auth OpenAI adapters and explicitly opted-in ChatGPT subscriptions. */
+export function transientRetryPolicyFor(provider: OcxProviderConfig): Required<TransientRetryPolicy> | null {
   const policy = provider.transientRetryOn5xx;
-  if (!policy || policy.enabled === false) return null;
-  // Both adapters this policy governs. The first version covered chat only, which left a
-  // key-auth Responses provider unable to tune its ladder in either direction, because the
-  // Responses passthrough lane hard-coded TRANSIENT_RETRY_MAX_ATTEMPTS (#4893). Widening this
-  // gate is necessary and not sufficient: the lane also has to call this function, which it
-  // now does. Still an explicit list, so no generic key-auth adapter opts in by accident, and
-  // the auth check below keeps the ChatGPT forward pool out -- those providers are
-  // `authMode: "forward"` and keep the default ladder they have always had.
-  if (provider.adapter !== "openai-chat" && provider.adapter !== "openai-responses") return null;
-  if (provider.authMode !== undefined && provider.authMode !== "key") return null;
+  if (!policy || policy.enabled === false) {
+    return null;
+  }
+  // Keep the adapter allowlist aligned with the lanes that consume this policy.
+  // Responses passthrough and native compact read it alongside Chat Completions (#4893).
+  if (provider.adapter !== "openai-chat" && provider.adapter !== "openai-responses") {
+    return null;
+  }
+  // Like retryOn429, auth fails closed: explicit key or the documented omitted key default.
+  // The only exception is canonical ChatGPT forward auth with an explicit total. An empty
+  // block must not activate the hold or change the historical Pool allowance.
+  if (provider.authMode !== undefined && provider.authMode !== "key"
+    && (policy.attempts === undefined || !isCanonicalOpenAiForwardProvider(provider))) {
+    return null;
+  }
   return {
     enabled: policy.enabled ?? DEFAULT_TRANSIENT_RETRY.enabled,
     attempts: policy.attempts ?? DEFAULT_TRANSIENT_RETRY.attempts,
@@ -718,8 +832,9 @@ export function recordDistributedKeyFailure(
 ): boolean {
   const provider = config.providers[providerName];
   if (!selection?.distributed || !provider || provider.authMode === "oauth" || provider.authMode === "forward") return false;
+  if (selection.cacheAffinity && (!cacheAffinityApplies(provider) || !affinitySelectionIsCurrent(providerName, provider, selection))) return false;
   const failed = provider.apiKeyPool?.find(entry => entry.id === selection.entryId && entry.key === selection.reference);
-  if (!failed || failed.disabled || provider.apiKeySelectionRevision !== selection.revision) return false;
+  if (!failed || failed.disabled || (!selection.cacheAffinity && provider.apiKeySelectionRevision !== selection.revision)) return false;
   const delay = status === "billing" ? ANTHROPIC_BILLING_COOLDOWN_MS : status === 401 ? MAX_COOLDOWN_MS : quotaResetAt !== undefined
     ? Math.max(1, quotaResetAt - now) : parseRetryAfterMs(retryAfter, now) ?? DEFAULT_COOLDOWN_MS;
   for (const entry of provider.apiKeyPool ?? []) if (entry.key === failed.key) {
@@ -771,7 +886,8 @@ function rotateKeyAfterFailure(
       : pool.find(entry => entry.key === failedKey);
 
     if (freshProvider.apiKey !== failedKey) {
-      const activeEntry = pool.find(entry => entry.key === freshProvider.apiKey);
+      const activeEntry = pool.find(entry => entry.key === freshProvider.apiKey && !entry.disabled)
+        ?? pool.find(entry => entry.key === freshProvider.apiKey);
       if (activeEntry && !activeEntry.disabled && !isKeyInCooldown(providerName, activeEntry.id, now)) {
         return {
           changed: false,
@@ -798,6 +914,7 @@ function rotateKeyAfterFailure(
   }, attemptedSelection);
   if (outcome.status === "unavailable") return null;
   if (outcome.status === "superseded") {
+    if (attemptedSelection?.cacheAffinity) return null;
     // Billing authority is bound to the sent selection; a newer manual choice grants no replay.
     if (acceptsFreshProvider) return null;
     // A newer manual selection (including A→B→A) owns subsequent dispatch. Reusing the

@@ -31,6 +31,7 @@ import {
 } from "../responses/thought-signature-replay";
 import {
   createCitationMarkerFilter,
+  escapeMemoryCitationMentions,
   stripCitationMarkers,
   type CitationMarkerFilter,
 } from "../responses/citation-markers";
@@ -92,6 +93,8 @@ function buildResponseJSONWithBudget(
     chatRawReasoningVisible?: boolean;
     /** Provider policy: suppress raw content-channel reasoning, keep provider-authored summaries. */
     hideRawReasoning?: boolean;
+    /** Opt-in verbatim raw reasoning on the summary channel for Chat-to-Responses clients. */
+    rawReasoningAsSummary?: boolean;
     toolNsMap?: Map<string, { namespace: string; name: string; freeform?: true }>;
     /** Request-visible tool names. Required for client calls when enforcement is explicitly enabled. */
     declaredToolNames?: ReadonlySet<string>;
@@ -99,6 +102,12 @@ function buildResponseJSONWithBudget(
     bareCustomToolNames?: ReadonlySet<string>;
     /** See `bridgeToResponsesSSE`: enforcement is separate from normalization (#4735). */
     enforceDeclaredToolNames?: boolean;
+    /**
+     * Escape a quoted `<oai-mem-citation>` tag in visible text (default true). The Codex client
+     * parses the tag and hides the rest of the answer; Chat Completions and Messages deliveries,
+     * whose clients never parse it, pass false so their text stays byte-for-byte.
+     */
+    escapeMemoryCitationTags?: boolean;
     /** Declared parameter schema per tool name; repairs integral-float integer args (#1611). */
     toolParameterSchemas?: ReadonlyMap<string, Record<string, unknown>>;
     freeformToolNames?: Set<string>;
@@ -256,7 +265,9 @@ function buildResponseJSONWithBudget(
     // ChatGPT-backend citation markers arrive as literal private-use characters that the
     // Codex TUI prints verbatim (#3150). Strip them here rather than at the accumulator so
     // the retained byte accounting above still describes what the upstream actually sent.
-    const text = stripCitationMarkers(currentTextStr);
+    // A quoted memory-citation tag is escaped for the Codex client only (citation-markers.ts).
+    const stripped = stripCitationMarkers(currentTextStr);
+    const text = options?.escapeMemoryCitationTags === false ? stripped : escapeMemoryCitationMentions(stripped);
     const sourceBytes = pendingWebSources.reduce((sum, source) => sum + bytesOf(JSON.stringify(source)), 0);
     const annotations = pendingWebSources.map(s => ({
       type: "url_citation", url: s.url, title: s.title || s.url, start_index: 0, end_index: 0,
@@ -319,10 +330,12 @@ function buildResponseJSONWithBudget(
       currentRawReasoning = emptyChunks();
       return;
     }
+    const asSummary = options?.rawReasoningAsSummary === true;
     pushOutput({
       type: "reasoning", id: `rs_${uuid()}`,
-      summary: [],
-      content: [{ type: "reasoning_text", text: rawText }],
+      summary: asSummary ? [{ type: "summary_text", text: rawText }] : [],
+      ...(asSummary ? { encrypted_content: encodeReasoningEnvelope({ txt: rawText, rawSummary: true }, budget) }
+        : { content: [{ type: "reasoning_text", text: rawText }] }),
     }, currentRawReasoning.bytes, "reasoning");
     currentRawReasoning = emptyChunks();
   };
@@ -406,7 +419,7 @@ function buildResponseJSONWithBudget(
           flushSummaryReasoning();
           flushRawReasoning();
           flushToolCall();
-          for (const item of anthropicProgressItems(e.text, e.anthropicThinkingSignature, budget)) pushOutput(item as OutputItem);
+          for (const item of anthropicProgressItems(e.text, e.anthropicThinkingSignature, budget, options?.escapeMemoryCitationTags !== false)) pushOutput(item as OutputItem);
           break;
         }
         // Only flush on an explicit phase change. A later delta that omits `phase` must keep

@@ -1,11 +1,18 @@
 import { ENCRYPTED_FUNCTION_OUTPUT_REJECTION, upstreamErrorMessageFromPayload } from "../../lib/errors";
 import { readBoundedResponseBody } from "../../lib/bounded-body";
-import { isReasoningEffortRejection } from "../../providers/reasoning-metadata";
+import { isHardPolicyOrOriginRefusal } from "../../lib/hard-refusal";
+import { isPlainObject } from "../../lib/plain-data";
+import {
+  hasConflictingReasoningEffortCode,
+  isReasoningEffortRejection,
+  planReasoningEffortDowngrade,
+} from "../../providers/reasoning-metadata";
 import { isAnthropicFastRefusal } from "../../providers/anthropic-fast";
 import type { AdapterRequest } from "../../adapters/base";
-import { isNonReplayableResponse } from "../../lib/upstream-retry";
+import { isNonReplayableResponse, retainPacedRetryResponse } from "../../lib/upstream-retry";
 import type { OcxParsedRequest } from "../../types";
 import type { RequestLogContext } from "../request-log";
+import { takeLocalFailureState } from "../request-log-failure-detail";
 import type { AttemptRecoveryKind } from "../../usage/log";
 import { rememberReasoningReplayOpaqueBlobRejection } from "../../responses/reasoning-replay-cache";
 import { resolvedAdapterWire } from "../../responses/continuation-ownership";
@@ -62,6 +69,43 @@ export function outboundResponsesInput(bodyText: string | undefined): unknown[] 
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The next published rung after an upstream reasoning-effort refusal, or undefined when no replay
+ * applies. A direct request repairs once. A combo candidate may walk the finite ladder one refused
+ * rung at a time: each refusal is learned, so a rung is never offered twice, and the request send
+ * budget bounds the walk (#8173). The caller sets `guard.attempted` when it actually replays.
+ */
+export async function refusedReasoningEffortDowngrade(
+  response: Response,
+  signal: AbortSignal,
+  guard: { attempted: boolean },
+  comboAttempt: boolean | undefined,
+  plan: Omit<Parameters<typeof planReasoningEffortDowngrade>[0], "rejectionText">,
+): Promise<ReturnType<typeof planReasoningEffortDowngrade>> {
+  if (guard.attempted && !comboAttempt) return undefined;
+  const rejectionText = await reasoningEffortRejectionText(response, false, signal);
+  return rejectionText === undefined
+    ? undefined
+    : planReasoningEffortDowngrade({ ...plan, rejectionText });
+}
+
+/**
+ * The passthrough rebuild serializes `_rawBody`, so a downgraded rung has to be written there as
+ * well or the replay resends the refused effort.
+ *
+ * Only shapes that already carry the control are rewritten. An absent `reasoning`, or one the
+ * caller sent as a string or `null`, is left exactly as it was: inventing `{ effort }` here would
+ * add a reasoning control to a body that never asked for one, and overriding a string would
+ * replace whatever that wire meant by it. `reasoning_effort` is kept in step only when present.
+ */
+export function withRawBodyReasoningEffort(rawBody: unknown, effort: string): unknown {
+  if (!isPlainObject(rawBody)) return rawBody;
+  const next: Record<string, unknown> = { ...rawBody };
+  if (isPlainObject(rawBody.reasoning)) next.reasoning = { ...rawBody.reasoning, effort };
+  if ("reasoning_effort" in rawBody) next.reasoning_effort = effort;
+  return next;
 }
 
 
@@ -365,7 +409,7 @@ export async function reasoningEffortRejectionText(
   if (response.status !== 400 && response.status !== 403) return undefined;
   try {
     const body = await readBoundedResponseBody(response.clone(), { signal });
-    if (!body.displaySafe || body.truncated) return undefined;
+    if (!body.displaySafe || body.truncated || isHardPolicyOrOriginRefusal(body.text) || hasConflictingReasoningEffortCode(body.text)) return undefined;
     return isReasoningEffortRejection(body.text) ? body.text : undefined;
   } catch {
     return undefined;
@@ -499,6 +543,7 @@ export function prepareOpaqueBlobRecovery(parsed: OcxParsedRequest): void {
 
 
 export function resetStreamedOpaqueBlobLogContext(logCtx: RequestLogContext): void {
+  takeLocalFailureState(logCtx);
   delete logCtx.upstreamError;
   delete logCtx.terminalHttpStatus;
   delete logCtx.terminalErrorCode;
@@ -523,8 +568,9 @@ export async function attemptOpaqueBlobRecovery<Failure = Response>(
     parsed: OcxParsedRequest;
     guard: OpaqueBlobRecoveryGuard;
     signal: AbortSignal;
+    preserveResponse?: boolean;
   },
-  rebuild: (kind: AttemptRecoveryKind) => Promise<Response | { failed: Failure }>,
+  rebuild: (kind: AttemptRecoveryKind, preceding?: Response) => Promise<Response | { failed: Failure }>,
 ): Promise<OpaqueBlobRecoveryResult<Failure>> {
   const errorBody = await opaqueBlobRejectionBodyForRecovery(
     args.response,
@@ -554,8 +600,16 @@ export async function attemptOpaqueBlobRecovery<Failure = Response>(
       }
     : undefined;
   prepareOpaqueBlobRecovery(args.parsed);
-  try { void args.response.body?.cancel().catch(() => {}); } catch { /* already consumed/closed */ }
-  const result = await rebuild("opaque-blob-rejection");
+  if (!args.preserveResponse) {
+    try { void args.response.body?.cancel().catch(() => {}); } catch { /* already consumed/closed */ }
+  }
+  const preceding = args.preserveResponse ? await retainPacedRetryResponse(args.response, args.signal) : undefined;
+  const result = await rebuild("opaque-blob-rejection", preceding);
+  if (result === args.response) return { kind: "skipped" };
+  if (result === preceding) return { kind: "recovered", response: result };
+  if (args.preserveResponse) {
+    try { void args.response.body?.cancel().catch(() => {}); } catch { /* already consumed/closed */ }
+  }
   if (!("failed" in result) && result.ok) {
     rememberReasoningReplayOpaqueBlobRejection(rejectedScope);
   }

@@ -1,4 +1,4 @@
-import type { UpstreamHttpVersion, ReasoningSummaryDelivery, CodexAccountMode } from "./wire";
+import type { UpstreamHttpVersion, ReasoningSummaryDelivery, CodexAccountMode, ThinkingDisplayPolicy } from "./wire";
 import type { AccountAutoPausePolicy, AccountPauseDetails } from "./account-auto-pause";
 import type { AnthropicAccountPoolConfig } from "./anthropic-account-pool";
 
@@ -10,6 +10,21 @@ import type { AnthropicAccountPoolConfig } from "./anthropic-account-pool";
  */
 export type RefreshPolicy = "proactive" | "lazy-only" | "disabled";
 
+/**
+ * Per-provider conversation affinity to the credential that served a conversation's
+ * last turn, so that credential's upstream prompt cache is read again instead of
+ * rebuilt on another key. `auto` keeps a binding only while the cache it built is
+ * measured to be worth keeping and still warm; `session` keeps it while the
+ * credential stays eligible; `turn` only across immediate continuations; `off`
+ * disables binding entirely. See src/providers/cache-affinity.ts.
+ */
+export type CacheAffinityMode = "auto" | "session" | "turn" | "off";
+
+/** Provider cache-affinity outcome recorded on a request-log row. */
+export type CacheAffinityOutcome = "kept" | "bound" | "released";
+/** Why that outcome happened; mirrors the store's keep reasons plus lifecycle outcomes. */
+export type CacheAffinityLogReason = "cache" | "session" | "turn" | "continuation" | "new" | "quota" | "auth";
+
 /** Request-owned identity of the configured key, before env/keychain resolution. */
 export interface ProviderApiKeySelection {
   entryId?: string;
@@ -17,6 +32,10 @@ export interface ProviderApiKeySelection {
   revision?: string;
   /** Request-local allocation; does not replace the saved active key. */
   distributed?: boolean;
+  /** Request-local cache-affinity pick; survives selection re-reads while its entry stays live. */
+  cacheAffinity?: boolean;
+  /** Opaque process-local credential and destination generation for an affinity pick. */
+  cacheAffinityGeneration?: string;
 }
 
 export interface OpenRouterProviderRouting {
@@ -56,14 +75,14 @@ export interface ResponsesItemIdRepairConfig {
  * Opt-in retry for pre-stream transient upstream statuses (500/502/503/504/520/521/522) on
  * `providers.<name>.transientRetryOn5xx`.
  *
- * Disabled unless the object is present; a bare `{}` opts in with defaults. Separate from
- * `retryOn429`, which handles rate limiting with its own waits.
+ * An object opts in for supported key-auth adapters. Canonical ChatGPT forward auth
+ * requires an explicit send total. Separate from `retryOn429`, which handles rate limiting.
  */
 export interface TransientRetryPolicy {
-  /** Master switch. Presence of the object also enables the policy (default true). */
+  /** Master switch for a qualifying policy (default true). */
   enabled?: boolean;
   /**
-   * TOTAL upstream sends allowed for one request, including the first (1..10, default 3).
+   * Total upstream sends allowed for one request, including the first (1..10, key-auth default 3).
    *
    * Not a per-layer retry count: the connection-reset and transient-status recovery layers
    * share this single budget, so `3` means at most three real requests reach the provider.
@@ -296,6 +315,8 @@ export interface ModelCapabilities extends ReasoningCapabilities {
   deepseekImageFiles?: boolean;
   /** Images a first-party Mistral Chat request may carry for this model; older ones are pruned. */
   mistralMaxImages?: number;
+  /** Exact-model Responses custom-tool support; absent inherits the provider contract. */
+  responsesCustomTools?: boolean;
 }
 
 /**
@@ -313,6 +334,12 @@ export interface OcxProviderConfig {
   alias?: string;
   /** Native model id -> short, slash-free request alias. */
   modelAliases?: Record<string, string>;
+  /**
+   * Opt-in alias template for models without a manual or built-in alias (#7705), for example
+   * `{providerAlias}-{modelBasename}`. Derived at resolution time and never written back; only the
+   * literal `{providerAlias}` and `{modelBasename}` placeholders are allowed.
+   */
+  aliasTemplate?: string;
   /** Display-only labels for exact native model ids discovered under this provider. */
   modelDisplayNames?: Record<string, string>;
   /** Override the global built-in model-alias switch for this provider. */
@@ -326,6 +353,21 @@ export interface OcxProviderConfig {
   codexToolMode?: "code_mode_only" | "shell";
   /** Optional outbound request-start pacing shared by this provider and its model overrides. */
   requestPacing?: ProviderRequestPacingConfig;
+  /**
+   * Per-provider override of the global `connectTimeoutMs` (response-header arrival deadline) for
+   * routed HTTP adapter sends, including routed model sends in the image/video and web-search
+   * bridges. A runTurn owns its transport and uses adapter-specific deadlines.
+   * A positive value applies verbatim, `0` disables the header deadline on covered paths,
+   * and an omitted value inherits the global setting.
+   */
+  connectTimeoutMs?: number;
+  /**
+   * Per-provider override of the global `stallTimeoutSec` for routed HTTP responses, streaming runTurn
+   * delivery, and inactivity in the image/video bridge. A positive value sets the inactivity budget,
+   * `0` disables it on covered paths, and an omitted value inherits the global setting.
+   * The web-search plan also uses the setting to size its independent bridge watchdog.
+   */
+  stallTimeoutSec?: number;
   /** Cursor MCP compatibility bounds; positive integers when configured. */
   mcpMaxTools?: number;
   mcpMaxSchemaBytes?: number;
@@ -490,6 +532,8 @@ export interface OcxProviderConfig {
    * reasoning output items when they are sent back on a continuation.
    */
   dropResponsesReasoningItems?: boolean;
+  /** Exact Ark Kimi endpoint IDs requiring the narrow stateless Responses replay projection. */
+  arkKimiResponsesModels?: string[];
   /**
    * Explicit opt-in for a relay that genuinely fronts OpenAI and can decode native
    * compaction blobs. Absent or false degrades foreign blobs to an opaque note.
@@ -584,13 +628,19 @@ export interface OcxProviderConfig {
    * `Authorization: Bearer <key>` instead.
    */
   apiKeyTransport?: "x-api-key" | "bearer";
+  /** Opt-in translated OAuth compatibility: move caller system instructions to user content,
+   * losing system-role precedence. Default false; API-key and native passthrough are unchanged. */
+  anthropicOAuthUserInstructions?: boolean;
   /**
    * Multi-key pool (API-key twin of OAuth multiauth). `apiKey` always mirrors the ACTIVE
    * entry so routing stays single-key; managed via /api/providers/keys. A legacy bare
    * `apiKey` seeds a one-entry pool on first management touch.
    */
   apiKeyPool?: Array<{ id: string; key: string; label?: string; addedAt?: number; disabled?: boolean; pauseDetails?: AccountPauseDetails; pauseRevision?: string }>;
-  /** Explicit opt-in permanent account refusal policy; default off. */
+  /**
+   * Permanent account refusal policy. Explicit opt-in; with no key at all, a Cloud Code Assist
+   * provider still pauses on the first Terms of Service account ban (see `effectiveAccountAutoPause`).
+   */
   accountAutoPause?: AccountAutoPausePolicy;
   /**
    * Optional proactive ordering for `apiKeyPool` when the committed key is already
@@ -614,6 +664,14 @@ export interface OcxProviderConfig {
    * or too flaky for startup/catalog sync.
    */
   liveModels?: boolean;
+  /**
+   * Per-provider live-discovery compatibility (#7910). `skipInvalidRows: true` skips individual
+   * `/models` rows whose id is missing, non-string, empty or otherwise invalid (and non-object
+   * rows) instead of rejecting the whole listing; a listing with no surviving row stays malformed.
+   * Absent or false keeps strict discovery. Unrelated to the top-level `OcxConfig.modelDiscovery`,
+   * which is persisted discovery state rather than provider configuration.
+   */
+  modelDiscovery?: { skipInvalidRows?: boolean };
   /**
    * Per-provider catalog allowlist. When non-empty, ONLY these model ids are emitted to Codex's
    * catalog and `/v1/models` — live discovery still runs, this just narrows what ships (so a proxy
@@ -639,8 +697,11 @@ export interface OcxProviderConfig {
    * visible. Empty/undefined = no opt-in (default behavior). See #1690.
    */
   retainModels?: string[];
-  /** Override for newly discovered models. Absent/"inherit" uses the install policy. */
-  newModelPolicy?: "on" | "off" | "inherit";
+  /**
+   * Override for newly discovered models. Absent/"inherit" uses the install policy. `admit`
+   * appends arrivals to a custom `selectedModels` (never a preset-derived one).
+   */
+  newModelPolicy?: "on" | "off" | "admit" | "inherit";
   /**
    * Model-preset marker for `selectedModels` (#2465). Absent means "all", exactly today's
    * semantics — an existing provider is never narrowed by an upgrade.
@@ -711,6 +772,11 @@ export interface OcxProviderConfig {
    * all-zero entry means "not billable here" and falls through to the catalogs.
    */
   modelCosts?: Record<string, ProviderCostOverlay>;
+  /**
+   * USD per provider credit (for example Kiro credits). For a model with a matched token price
+   * and a valid `providerCredits` reading, the estimate uses credits × this price.
+   */
+  creditPriceUsd?: number;
   /**
    * Provider-wide auto-review (approval) model for routed models of this provider.
    *
@@ -842,6 +908,14 @@ export interface OcxProviderConfig {
    */
   modelReasoningSummaryDelivery?: Record<string, ReasoningSummaryDelivery>;
   /**
+   * Anthropic adaptive `thinking.display` policy for this provider (#8363). `auto` and omission
+   * keep the built-in selection: native Opus 5.5 progress updates, summarized thinking elsewhere.
+   * `updates` is only sendable to native Opus 5.5 and degrades to `auto` for other models.
+   */
+  thinkingDisplay?: ThinkingDisplayPolicy;
+  /** Per-model override of `thinkingDisplay`, keyed by the exact upstream model id. */
+  modelThinkingDisplay?: Record<string, ThinkingDisplayPolicy>;
+  /**
    * Exact-model hosted tools that win collisions with Codex client tool declarations.
    * Use for non-forward Responses gateways that reserve a hosted tool namespace server-side.
    */
@@ -890,6 +964,19 @@ export interface OcxProviderConfig {
    */
   unsupportedHostedTools?: string[];
   /**
+   * Hosted tool declarations this Responses destination rejects only in combination with
+   * client tools, so they are stripped when the same request also declares a `function` or
+   * `custom` tool, or a namespace with members, in `tools`, a client-loaded
+   * `additional_tools` catalog, or a `tool_search_output` result. A request that declares
+   * only hosted tools keeps them.
+   *
+   * This describes a gateway that serves hosted `web_search` alone and function calling
+   * alone, but answers HTTP 400 when one request carries both (#8204). Same vocabulary and
+   * alias expansion as `unsupportedHostedTools`, which stays authoritative: a tool listed
+   * there is removed whether or not client tools are present.
+   */
+  unsupportedHostedToolsWithClientTools?: string[];
+  /**
    * Provider-local repair for Responses gateways whose lifecycle snapshots omit canonical
    * fields or closing events (#893). Disabled by default and applied only to client-facing
    * SSE/JSON; raw inspection state remains authoritative.
@@ -903,6 +990,11 @@ export interface OcxProviderConfig {
    * buffered JSON reconstructed from upstream SSE; ordinary upstream JSON is unchanged.
    */
   messagePhaseInference?: boolean;
+  /**
+   * Opt-in (#7427): on a native Responses route, add estimated `usage` to a completed response the
+   * provider sent without one, marked by `x-opencodex-usage-estimated`. Never used for cost, spend or quota.
+   */
+  estimateMissingUsage?: boolean;
   /**
    * Opt-in hosted-web-search bridge for this KEY-auth Responses passthrough provider (#3761).
    * Absent or disabled leaves the passthrough byte-identical to today.
@@ -1030,6 +1122,14 @@ export interface OcxProviderConfig {
    */
   promptCacheKey?: boolean;
   /**
+   * Conversation affinity to the key-pool credential that served a conversation's
+   * last turn, so its upstream prompt cache is read again on the next turn instead
+   * of rebuilt on another key. Only affects providers with 2+ key-pool entries;
+   * eligibility (cooldowns, pacing, disabled keys) always outranks the preference.
+   * Default `auto`. See src/providers/cache-affinity.ts.
+   */
+  cacheAffinity?: CacheAffinityMode;
+  /**
    * Opt-in: forward caller `service_tier` values to the upstream `/chat/completions` body.
    * On a classified route it governs foreign values (for example `flex`), not proxy-owned
    * canonical Fast after capability validation. On an unclassified route it governs every caller
@@ -1063,7 +1163,7 @@ export interface OcxProviderConfig {
   /**
    * Default to displaying provider-authored summaries when Responses summary is omitted.
    * Explicit wire summary:"none" wins; false disables a seeded provider default.
-   * Raw reasoning is never relabeled as a summary.
+   * Raw reasoning is controlled separately by rawReasoningAsSummary.
    */
   showThinkingSummary?: boolean;
   /**
@@ -1075,6 +1175,12 @@ export interface OcxProviderConfig {
    */
   hideRawReasoning?: boolean;
   /**
+   * Default-off Chat-to-Responses display compatibility: expose raw reasoning on the summary
+   * channel, verbatim (not a generated summary). hideRawReasoning and wire summary:"none" win.
+   * Native Responses passthrough and direct Chat/Messages delivery are unchanged.
+   */
+  rawReasoningAsSummary?: boolean;
+  /**
    * Opt-in same-target 429 retry policy. Codex itself never retries 429 (it retries 5xx only,
    * openai/codex#30471), and single-key pools have no failover, so the proxy waits and replays
    * the identical request on the same key before any failover. Pre-stream only: a 429 arrives
@@ -1083,8 +1189,8 @@ export interface OcxProviderConfig {
   retryOn429?: RateLimitRetryPolicy;
   /**
    * Opt-in retry for pre-stream transient upstream statuses
-   * (`providers.<name>.transientRetryOn5xx`). Disabled unless present; a bare `{}` opts in
-   * with defaults. Key-auth `openai-chat` only.
+   * (`providers.<name>.transientRetryOn5xx`). A bare `{}` opts in with defaults on supported
+   * key-auth OpenAI adapters. Canonical ChatGPT forward providers require explicit `attempts`.
    */
   transientRetryOn5xx?: TransientRetryPolicy;
   /**
@@ -1137,6 +1243,23 @@ export interface OcxProviderConfig {
    * other EOFs remain truncation errors. Absent = strict default behavior.
    */
   anthropicEofTolerance?: boolean;
+  /** Opt in to one owner-bound image-context recovery after an upstream 413. */
+  anthropicImageContextRecovery?: boolean;
+  /**
+   * Claude Code's typed Advisor server tool (`advisor_20260301`) on the translated Messages lane.
+   * Absent: forwarded only to an `anthropic`-adapter provider on first-party `api.anthropic.com`.
+   * `true`: an Anthropic-compatible gateway that runs it receives the declaration, its history and
+   * the `advisor-tool-2026-03-01` beta too. `false`: never forwarded, even first-party.
+   */
+  forwardAdvisorTool?: boolean;
+  /**
+   * Experimental, default off (#6895). On an `anthropic`-adapter provider that sends to
+   * `api.anthropic.com` with an API key, a Codex conversation that changes reasoning effort keeps
+   * the top-level `output_config.effort` at its first turn's value and sends each change as an
+   * effort-only system message (beta `mid-conversation-output-config-2026-07-01`), so the prompt
+   * cache survives the change. Any turn the history cannot prove is sent exactly as without it.
+   */
+  perMessageEffort?: boolean;
   /**
    * Model ids that do NOT accept image inputs. The proxy gives them "eyes" via the vision sidecar:
    * attached images are described by a gpt vision model and replaced with text before the call.

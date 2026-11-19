@@ -80,6 +80,12 @@ export const PROTOCOL_REASON_CODES = [
   "anthropic-beta-dropped",
   /** Thinking signatures or `redacted_thinking` removed for a destination that cannot verify them. */
   "opaque-state-stripped",
+  /** Claude Code's typed Advisor tool was not forwarded: the proxy Advisor's synthetic `advisor` owns the name this turn. */
+  "advisor-tool-shadowed-by-proxy-advisor",
+  /** A typed Advisor declaration named a model outside the caller's admission scope and was not forwarded. */
+  "advisor-tool-outside-model-scope",
+  /** The request enforces token spend ceilings, so the separately unaccounted hosted Advisor was withheld. */
+  "advisor-tool-withheld-by-spend-policy",
 ] as const;
 export type ProtocolReasonCode = (typeof PROTOCOL_REASON_CODES)[number];
 

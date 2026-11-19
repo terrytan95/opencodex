@@ -36,12 +36,20 @@ export function registerSseLane(lane: string) {
         expect(facts.sends, key).toBe(before.sends);
         const status = input.kind === "FOLD-502" ? 502 : before.status;
         expect(after.status, key).toBe(status);
+        // A cancel now keeps the usage it already received (#7374 review); the base dropped it.
+        const internal = (row: any) => input.fault === "cancel" ? { ...row, usage: "cancel" } : row;
         if (lane === "fold") {
           expect(after.internal.settlements, key).toEqual(before.internal.settlements.map((row: any) => ({ ...row, status: row.status === 200 ? 502 : row.status })));
-          expect({ ...after.internal, settlements: [] }, key).toEqual({ ...before.internal, settlements: [] });
-        } else expect(after.internal, key).toEqual(before.internal);
+          expect(internal({ ...after.internal, settlements: [] }), key).toEqual(internal({ ...before.internal, settlements: [] }));
+        } else expect(internal(after.internal), key).toEqual(internal(before.internal));
         const ordinary = input.kind === "non-error" || input.kind === "rename" || lane === "tap";
-        if (ordinary) {
+        if (input.id === "echo-renamed-ping" && (lane === "native" || lane === "builtin")) {
+          // The final event is ping. Preserve both event fields and every other baseline byte.
+          const baseBody = Bun.gunzipSync(Buffer.from(golden.dictionaries.bodies[values[10]], "base64"));
+          const expected = Buffer.from(new TextDecoder().decode(baseBody)
+            .replace(/^event: message_start\n/, "event: error\nevent: ping\n"));
+          expect(bytes, key).toEqual(expected);
+        } else if (ordinary) {
           expect(after.bodySha256, key).toBe(before.bodySha256);
           expect(after.bodyLength, key).toBe(before.bodyLength);
           if (input.kind === "non-error" || lane === "tap") {

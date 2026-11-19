@@ -1,5 +1,7 @@
 import { ACCOUNT_LOG_LABEL_RE } from "../codex/account-label";
+import { anthropicAccountTag } from "../providers/label";
 import { isCodexUsageAccountLogLabel, type PersistedUsageAttempt } from "../usage/log";
+import { sealedCredentialRefusals } from "./request-log-attempt-recovery";
 
 /**
  * Did the account behind a sent attempt change between two sends of the same request?
@@ -36,12 +38,17 @@ export function sealRequestAttemptIdentity(
   adapter: string,
   accountLogLabel?: string,
 ): void {
-  if (!attempt) return;
+  if (!attempt || sealedCredentialRefusals.has(attempt)) return;
   if (attempt.provider !== provider || attempt.adapter !== adapter) delete attempt.credentialSource;
   // The adapter keeps re-stamping: a mid-turn wire rotation is still this same physical send.
   attempt.adapter = adapter;
   if (attempt.sendCount === 0) {
     attempt.provider = provider;
+    // The Anthropic pool tag is a pure function of this frozen provider, so a failover split
+    // (a fresh attempt sealed with the next account's provider) carries the next account's tag.
+    const accountTag = anthropicAccountTag(provider);
+    if (accountTag) attempt.accountTag = accountTag;
+    else delete attempt.accountTag;
     if (isCodexUsageAccountLogLabel(accountLogLabel)) attempt.accountLogLabel = accountLogLabel;
     else delete attempt.accountLogLabel;
     return;

@@ -1,4 +1,15 @@
-import { codexAccountModelRefusal, codexAccountModelRefusalPayload, hasConflictingCodexModelRefusalEnvelopes, type CodexAccountModelRefusal } from "../../combos/failover";
+import {
+  codexAccountModelRefusal,
+  codexAccountModelRefusalPayload,
+  envelopeErrorRecord,
+  envelopeRecordCode,
+  hasConflictingCodexModelRefusalEnvelopes,
+  isMalformedResponseFormatRecord,
+  isOpenRouterOpaque400EnvelopeRoot,
+  isProviderModerationRefusal,
+  isOpenRouterOpaque400Record,
+  type CodexAccountModelRefusal,
+} from "../../combos/failover";
 import type { ResponsesTerminalStatus } from "../../bridge";
 import { comboFailureDecision } from "../../combos";
 import { httpStatusFromTerminalError } from "../../lib/errors";
@@ -6,14 +17,20 @@ import { hasResponseMediaType } from "../../lib/http-response-semantics";
 import type { RequestFailureStage } from "../../lib/request-failure-model";
 import type { RequestLogContext } from "../request-log";
 import { carryResponseToolOwnership } from "./response-tool-ownership";
-import { createSseInspector } from "../relay";
+import { responsesFrameIsReplayUnsafe } from "./codex-ws-wire";
+import { createSseInspector, isNativePassthroughSseResponse } from "../relay";
+import { sseDataPayload } from "../sse-payload-rewrite";
 import { MAX_CLIENT_SSE_FRAME_BYTES } from "../sse-frame-buffer";
-import { REQUIRED_TOOL_CONTRACT_CODE } from "../../lib/errors";
+import { COMBO_DEGENERATE_COMPLETION_CODE, REQUIRED_TOOL_CONTRACT_CODE, responsesCompletionError } from "../../lib/errors";
+import { attachComboFailureEvidence, isPausedTurn } from "../../lib/client-error-body";
 import { requiredToolReasoningPrelude } from "./combo-required-tool-stream";
+import { ProtocolPreOutputEof } from "../../lib/upstream-retry";
+import { carryPacedStream, pacedQueuingStrategy } from "../../lib/paced-stream";
 
 const COMBO_STREAM_PREFLIGHT_MAX_BYTES = MAX_CLIENT_SSE_FRAME_BYTES;
-// Required-tool reasoning may delay delivery, but never for an unbounded/trickling prelude.
-const COMBO_REQUIRED_TOOL_REASONING_HOLD_MS = 1_000;
+// Bound the prelude hold from its first client-visible event, even if upstream goes quiet.
+const COMBO_STREAM_PRELUDE_HOLD_MS = 1_000;
+const RESET_PREFLIGHT_HEARTBEAT_MS = 15_000;
 // Keep retained object count proportional to the same byte budget used by the
 // shared SSE framer. Tiny or empty upstream reads must not bypass the byte cap.
 const COMBO_STREAM_PREFLIGHT_MAX_CHUNKS = Math.max(
@@ -26,6 +43,143 @@ const PRE_OUTPUT_CONTROL_EVENTS = new Set([
   "response.in_progress",
   "response.queued",
   "response.heartbeat",
+]);
+
+const PRE_OUTPUT_EVENT_FIELDS = new Set([
+  "type", "response", "sequence_number", "replayUnsafe", "error", "last_error",
+  "incomplete_details", "status", "output", "item", "delta", "content", "message", "code",
+]);
+
+// These are response identity and request-configuration fields, not output carriers.
+// Unknown snapshot extensions commit the original instead of guessing whether they hide output.
+const PRE_OUTPUT_SNAPSHOT_FIELDS = new Set([
+  "id", "object", "created_at", "completed_at", "status", "model", "output", "error", "last_error",
+  "incomplete_details", "usage", "background", "instructions", "max_output_tokens", "max_tool_calls",
+  "metadata", "parallel_tool_calls", "previous_response_id", "prompt", "prompt_cache_key",
+  "prompt_cache_retention", "reasoning", "safety_identifier", "service_tier", "store", "temperature",
+  "text", "tool_choice", "tools", "top_p", "top_logprobs", "truncation", "user", "end_turn", "replayUnsafe",
+]);
+
+const PRE_OUTPUT_STRING_FIELDS = [
+  "id", "object", "model", "prompt_cache_key", "prompt_cache_retention", "safety_identifier",
+  "service_tier", "truncation", "user",
+] as const;
+const PRE_OUTPUT_NUMBER_FIELDS = ["created_at", "max_output_tokens", "max_tool_calls", "temperature", "top_p", "top_logprobs"] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function recordWithOnly(value: unknown, fields: readonly string[]): value is Record<string, unknown> {
+  return isRecord(value) && Object.keys(value).every(key => fields.includes(key));
+}
+
+function safeSnapshotTools(value: unknown, budget: { remaining: number }, depth = 0): boolean {
+  if (!Array.isArray(value) || depth > 4) return false;
+  return value.every(tool => {
+    if (--budget.remaining < 0 || !isRecord(tool)) return false;
+    if (tool.type === "function") {
+      return recordWithOnly(tool, ["type", "name", "description", "parameters", "strict"])
+        && typeof tool.name === "string"
+        && (tool.description == null || typeof tool.description === "string")
+        && (tool.parameters == null || isRecord(tool.parameters))
+        && (tool.strict == null || typeof tool.strict === "boolean");
+    }
+    if (tool.type === "custom") {
+      if (!recordWithOnly(tool, ["type", "name", "description", "format"])
+        || typeof tool.name !== "string"
+        || (tool.description != null && typeof tool.description !== "string")) return false;
+      if (tool.format == null) return true;
+      return recordWithOnly(tool.format, ["type", "syntax", "definition"])
+        && (tool.format.type === "text" || tool.format.type === "grammar")
+        && (tool.format.syntax == null || typeof tool.format.syntax === "string")
+        && (tool.format.definition == null || typeof tool.format.definition === "string");
+    }
+    if (tool.type === "tool_search") {
+      return recordWithOnly(tool, ["type", "execution", "description"])
+        && tool.execution === "client" && (tool.description == null || typeof tool.description === "string");
+    }
+    return tool.type === "namespace" && recordWithOnly(tool, ["type", "name", "description", "tools"])
+      && typeof tool.name === "string" && (tool.description == null || typeof tool.description === "string")
+      && safeSnapshotTools(tool.tools, budget, depth + 1);
+  });
+}
+
+function safeSnapshotUsage(value: unknown): boolean {
+  if (!recordWithOnly(value, ["input_tokens", "output_tokens", "total_tokens", "input_tokens_details", "output_tokens_details"])) return false;
+  for (const key of ["input_tokens", "output_tokens", "total_tokens"]) {
+    if (value[key] != null && !(typeof value[key] === "number" && Number.isFinite(value[key]) && value[key] >= 0)) return false;
+  }
+  for (const [key, fields] of [
+    ["input_tokens_details", ["cached_tokens"]],
+    ["output_tokens_details", ["reasoning_tokens"]],
+  ] as const) {
+    const detail = value[key];
+    if (detail != null && (!recordWithOnly(detail, fields)
+      || Object.values(detail).some(count => !(typeof count === "number" && Number.isFinite(count) && count >= 0)))) return false;
+  }
+  return true;
+}
+
+function snapshotMetadataIsSafe(snapshot: Record<string, unknown>): boolean {
+  if (PRE_OUTPUT_STRING_FIELDS.some(key => snapshot[key] != null && typeof snapshot[key] !== "string")) return false;
+  if (snapshot.object != null && snapshot.object !== "response") return false;
+  if (PRE_OUTPUT_NUMBER_FIELDS.some(key => snapshot[key] != null
+    && !(typeof snapshot[key] === "number" && Number.isFinite(snapshot[key])))) return false;
+  if (snapshot.parallel_tool_calls != null && typeof snapshot.parallel_tool_calls !== "boolean") return false;
+  if (snapshot.tools != null && !safeSnapshotTools(snapshot.tools, { remaining: 4096 })) return false;
+  if (snapshot.instructions != null && typeof snapshot.instructions !== "string") return false;
+  if (snapshot.prompt != null) {
+    if (!recordWithOnly(snapshot.prompt, ["id", "version", "variables"])
+      || typeof snapshot.prompt.id !== "string"
+      || (snapshot.prompt.version != null && typeof snapshot.prompt.version !== "string")
+      || (snapshot.prompt.variables != null && (!isRecord(snapshot.prompt.variables)
+        || Object.values(snapshot.prompt.variables).some(value => typeof value !== "string")))) return false;
+  }
+  if (typeof snapshot.tool_choice === "string" && !["none", "auto", "required"].includes(snapshot.tool_choice)) return false;
+  if (snapshot.tool_choice != null && typeof snapshot.tool_choice !== "string") {
+    if (!recordWithOnly(snapshot.tool_choice, ["type", "name", "namespace", "function"])
+      || typeof snapshot.tool_choice.type !== "string"
+      || !["function", "custom", "tool_search"].includes(snapshot.tool_choice.type)
+      || (snapshot.tool_choice.name != null && typeof snapshot.tool_choice.name !== "string")
+      || (snapshot.tool_choice.namespace != null && typeof snapshot.tool_choice.namespace !== "string")) return false;
+    const selected = snapshot.tool_choice.function;
+    if (selected != null && (!recordWithOnly(selected, ["name"]) || typeof selected.name !== "string")) return false;
+  }
+  if (snapshot.usage != null && !safeSnapshotUsage(snapshot.usage)) return false;
+  if (snapshot.metadata != null && (!isRecord(snapshot.metadata)
+    || Object.values(snapshot.metadata).some(value => typeof value !== "string"))) return false;
+  if (snapshot.reasoning != null) {
+    if (!recordWithOnly(snapshot.reasoning, ["effort", "summary", "generate_summary"])
+      || Object.values(snapshot.reasoning).some(value => value != null && typeof value !== "string")) return false;
+    if (snapshot.reasoning.effort != null
+      && !["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(String(snapshot.reasoning.effort))) return false;
+    if ([snapshot.reasoning.summary, snapshot.reasoning.generate_summary].some(value => value != null
+      && !["auto", "concise", "detailed"].includes(String(value)))) return false;
+  }
+  if (snapshot.text != null) {
+    if (!recordWithOnly(snapshot.text, ["format", "verbosity"])
+      || (snapshot.text.verbosity != null && typeof snapshot.text.verbosity !== "string")) return false;
+    const format = snapshot.text.format;
+    if (format != null && (!recordWithOnly(format, ["type", "name", "description", "schema", "strict"])
+      || typeof format.type !== "string"
+      || !["text", "json_object", "json_schema"].includes(format.type)
+      || (format.name != null && typeof format.name !== "string")
+      || (format.description != null && typeof format.description !== "string")
+      || (format.schema != null && !isRecord(format.schema))
+      || (format.strict != null && typeof format.strict !== "boolean"))) return false;
+  }
+  return true;
+}
+
+// The Codex WebSocket metadata channel (`codex-ws-metadata.ts`) writes these into the same SSE
+// body, typically ahead of `response.created`. They are rebuilt field by field from quota and
+// header metadata, so they are neither output nor a terminal. Committing on them made a native
+// target that declined before any output (#8107) final for the whole combo. Every other unknown
+// type still commits.
+const CODEX_METADATA_CONTROL_EVENTS = new Set([
+  "codex.rate_limits",
+  "codex.response.metadata",
 ]);
 
 const TERMINAL_EVENTS = new Set([
@@ -44,15 +198,110 @@ const RETRYABLE_ZERO_OUTPUT_INCOMPLETE_REASONS = new Set([
   "upstream_stall_timeout",
 ]);
 
-function bareErrorStatus(payload: unknown): number | undefined {
+/** Item-scoped frames that can belong to a commentary-phase message. */
+const MESSAGE_CONTENT_EVENTS = new Set([
+  "response.content_part.added",
+  "response.content_part.done",
+  "response.output_text.delta",
+  "response.output_text.done",
+  "response.output_text.annotation.added",
+]);
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function hasOnlyPreludeParts(parts: unknown, type: "output_text" | "reasoning_text" | "summary_text"): boolean {
+  return parts === undefined || (Array.isArray(parts) && parts.every(part => recordValue(part)?.type === type));
+}
+
+function isDegeneratePreludeItem(item: Record<string, unknown>): boolean {
+  if (item.type === "reasoning") {
+    return hasOnlyPreludeParts(item.content, "reasoning_text") && hasOnlyPreludeParts(item.summary, "summary_text");
+  }
+  return item.type === "message" && item.phase === "commentary" && hasOnlyPreludeParts(item.content, "output_text");
+}
+
+/**
+ * Degenerate-completion prelude: reasoning frames and message items explicitly marked
+ * `phase: "commentary"` announce work rather than deliver it, so they stay replayable
+ * inside the buffer window. `commentaryItemIds` correlates item-scoped content frames
+ * (which carry no phase) back to the commentary item that opened them; an unidentified
+ * item always commits, so a final answer can never be held by mistake.
+ */
+function comboStreamDegeneratePrelude(payload: unknown, commentaryItemIds: Set<string>): boolean {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+  const event = payload as Record<string, unknown>;
+  if (event.type === "response.output_item.added" || event.type === "response.output_item.done") {
+    const item = recordValue(event.item);
+    if (!item || !isDegeneratePreludeItem(item)) return false;
+    if (item.type === "message" && typeof item.id === "string") commentaryItemIds.add(item.id);
+    return true;
+  }
+  if (typeof event.type === "string" && MESSAGE_CONTENT_EVENTS.has(event.type)) {
+    if ((event.type === "response.content_part.added" || event.type === "response.content_part.done")
+      && recordValue(event.part)?.type !== "output_text") return false;
+    return typeof event.item_id === "string" && commentaryItemIds.has(event.item_id);
+  }
+  return requiredToolReasoningPrelude(payload);
+}
+
+function incompleteCarriersVetoReplay(...carriers: Array<Record<string, unknown> | undefined>): boolean {
+  return carriers.some(carrier => carrier?.end_turn === false
+    || recordValue(carrier?.incomplete_details)?.retryable === false);
+}
+
+function classifyIncompleteReplayReason(
+  event: Record<string, unknown>,
+  response: Record<string, unknown> | undefined,
+): "veto" | "output-limit" | "retryable" {
+  const reasons = [recordValue(event.incomplete_details)?.reason, recordValue(response?.incomplete_details)?.reason];
+  if (reasons.some(reason => reason !== undefined && reason !== "max_output_tokens"
+    && (typeof reason !== "string" || !RETRYABLE_ZERO_OUTPUT_INCOMPLETE_REASONS.has(reason)))) return "veto";
+  return reasons.includes("max_output_tokens") ? "output-limit" : "retryable";
+}
+
+/**
+ * A terminal whose entire output is reasoning/commentary prelude delivered nothing the
+ * caller can act on: the model announced work and stopped. Verified against the terminal
+ * snapshot itself so a final answer or tool call seen only there still commits.
+ */
+function isDegenerateStreamTerminal(payload: unknown, context?: object): boolean {
+  const event = recordValue(payload);
+  if (!event || (event.type !== "response.completed" && event.type !== "response.incomplete")) return false;
+  const response = recordValue(event.response);
+  if (event.error != null || event.last_error != null || response?.error != null || response?.last_error != null) return false;
+  // Output limits have a separate zero-output recovery contract. With prelude output they commit.
+  if (incompleteCarriersVetoReplay(event, response)
+    || classifyIncompleteReplayReason(event, response) !== "retryable"
+    || (event.type === "response.incomplete" && isPausedTurn(context))) return false;
+  // Both carriers count: an item that exists only at event level is still client-visible
+  // output the hop would lose, exactly as retryableZeroOutputTerminal treats it.
+  const carriers = [event.output, response?.output].filter(value => value !== undefined);
+  if (carriers.length === 0) return false;
+  let preludeItems = 0;
+  for (const carrier of carriers) {
+    if (!Array.isArray(carrier)) return false;
+    for (const item of carrier) {
+      const record = recordValue(item);
+      if (!record) return false;
+      if (!isDegeneratePreludeItem(record)) return false;
+      preludeItems++;
+    }
+  }
+  return preludeItems > 0;
+}
+
+export function explicitErrorEventStatus(payload: unknown): number | undefined {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
   const event = payload as Record<string, unknown>;
-  if (event.type !== "error") return undefined;
   const nested = event.error;
   const error = nested && typeof nested === "object" && !Array.isArray(nested)
     ? nested as Record<string, unknown>
     : event;
-  const explicitStatus = [
+  return [
     event.status,
     event.status_code,
     event.http_status,
@@ -66,10 +315,67 @@ function bareErrorStatus(payload: unknown): number | undefined {
         ? Number(value)
         : undefined)
     .find(value => value !== undefined && value >= 400 && value <= 599);
-  const code = typeof error.code === "string"
-    ? error.code
-    : typeof event.code === "string" ? event.code : null;
+}
+
+function ambiguousSseFrame(frame: string): boolean {
+  let event: string | undefined;
+  let hasNonComment = false;
+  for (const line of frame.split(/\r\n|\r|\n/)) {
+    if (!line || line.startsWith(":")) continue;
+    hasNonComment = true;
+    const colon = line.indexOf(":");
+    const field = colon < 0 ? line : line.slice(0, colon);
+    if (field === "event") {
+      const value = colon < 0 ? "" : line.slice(colon + 1);
+      event = value.startsWith(" ") ? value.slice(1) : value;
+    }
+  }
+  const data = sseDataPayload(frame);
+  if (data === null || data === "") return hasNonComment;
+  if (!event) return false;
+  try {
+    const payload: unknown = JSON.parse(data);
+    return !payload || typeof payload !== "object" || Array.isArray(payload)
+      || (payload as { type?: unknown }).type !== event;
+  } catch {
+    return true;
+  }
+}
+
+function bareErrorStatus(payload: unknown): number | undefined {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+  const event = payload as Record<string, unknown>;
+  if (event.type !== "error") return undefined;
+  const nested = event.error;
+  const error = nested && typeof nested === "object" && !Array.isArray(nested)
+    ? nested as Record<string, unknown>
+    : event;
+  const explicitStatus = explicitErrorEventStatus(payload);
+  const rawCode = error.code ?? event.code;
+  const code = typeof rawCode === "string"
+    ? rawCode
+    : typeof rawCode === "number" && Number.isFinite(rawCode)
+      ? String(rawCode)
+      : null;
   if (explicitStatus === undefined && code === "invalid_request_error") return 400;
+  // A structured moderation verdict with no stated status is the request-level 400 the HTTP and
+  // native readers judge it as, not an unknown code's 5xx.
+  if (explicitStatus === undefined && isProviderModerationRefusal(400, JSON.stringify(event), undefined, true)) {
+    return 400;
+  }
+  // Status is the record's own evidence; whether that record speaks for the envelope is the
+  // decision's question, so a root hard stop still reports 400 instead of inventing a 5xx.
+  if (explicitStatus === undefined && isOpenRouterOpaque400Record(envelopeErrorRecord(event))) {
+    return 400;
+  }
+  // OpenRouter-style envelopes carry the HTTP status as a bare numeric `code` (e.g. `code: 400`)
+  // with no separate status field. `httpStatusFromTerminalError` only understands symbolic codes,
+  // so without this the opaque 400 stringifies to "400", reads as unknown, and falls back to 502 —
+  // which cools the target on the generic 5xx path instead of taking the intended no-cool hop.
+  if (explicitStatus === undefined
+    && typeof rawCode === "number" && Number.isInteger(rawCode) && rawCode >= 400 && rawCode <= 599) {
+    return rawCode;
+  }
   return explicitStatus ?? httpStatusFromTerminalError({
     type: typeof error.type === "string" && error.type !== "error" ? error.type : undefined,
     code,
@@ -105,61 +411,123 @@ function bareErrorIsRetryable(payload: unknown): boolean {
     return false;
   }
   const event = payload as Record<string, unknown>;
-  const nested = event.error;
-  const error = nested && typeof nested === "object" && !Array.isArray(nested)
-    ? nested as Record<string, unknown>
-    : event;
-  const code = typeof error.code === "string"
-    ? error.code
-    : typeof event.code === "string" ? event.code : null;
+  // The record selection, the opaque verdict and the code conflict rule are shared with the HTTP
+  // consumer; only the carrier (one parsed frame here, one body there) differs.
+  const record = envelopeErrorRecord(event);
+  const error = record ?? event;
+  const rootCode = envelopeRecordCode(event);
+  const recordCode = envelopeRecordCode(record);
   const message = typeof error.message === "string"
     ? error.message
     : typeof event.message === "string" ? event.message : "";
+  const rawRecord = {
+    ...(error as Record<string, unknown>),
+    ...(typeof event.detail === "string" ? { detail: event.detail } : {}),
+  };
+  const malformedResponseFormat = status === 400 ? isMalformedResponseFormatRecord(rawRecord, message) : undefined;
+  const openRouterOpaque400 = status === 400 ? isOpenRouterOpaque400EnvelopeRoot(event) : undefined;
+  // The parsed event is the whole terminal record, so its moderation verdict is not cut short.
+  const providerModerationRefusal = status === 400 || status === 422
+    ? isProviderModerationRefusal(status, JSON.stringify(event), undefined, true) : undefined;
+  // A conflicting root and record code hop only when each would hop on its own, so a root hard
+  // stop is never hidden behind a retryable record code (and a retryable pair keeps dev's hop).
   return comboFailureDecision(status, message, {
-    code, codexModelRefusal: terminalModelRefusal(status, event),
+    code: recordCode ?? rootCode, rootCode,
+    codexModelRefusal: terminalModelRefusal(status, event),
+    malformedResponseFormat, openRouterOpaque400, providerModerationRefusal,
   }) === "hop";
 }
 
-function retryableZeroOutputTerminal(payload: unknown): boolean {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
-  const event = payload as {
-    type?: unknown;
-    response?: { incomplete_details?: { reason?: unknown }; output?: unknown };
-  };
+/**
+ * Only text and reasoning items, which the required-tool guard holds back until it decides. Both the
+ * snapshot's and the event's own `output` are read; an absent or empty one contributes nothing.
+ */
+function heldOnlyOutput(...outputs: unknown[]): boolean {
+  const items = outputs.flatMap(output => Array.isArray(output) ? output : []);
+  if (outputs.some(output => output !== undefined && !Array.isArray(output))) return false;
+  return items.length > 0 && items.every(value => {
+    const item = recordValue(value);
+    return item?.type === "reasoning" || (item?.type === "message" && Array.isArray(item.content)
+      && item.content.every(part => recordValue(part)?.type === "output_text"));
+  });
+}
+
+function retryableZeroOutputTerminal(payload: unknown, context?: object): boolean {
+  const event = recordValue(payload);
+  if (!event) return false;
   if (bareErrorIsRetryable(event)) return true;
-  if (event.type === "response.failed") {
-    const error = (event.response as { error?: { code?: unknown; retryable?: unknown } } | undefined)?.error;
+  const response = recordValue(event.response);
+  const target = response ?? event;
+  const emptyOutput = (!Array.isArray(event.output) || event.output.length === 0)
+    && (!Array.isArray(target.output) || target.output.length === 0);
+
+  if (event.type === "response.failed" || event.status === "failed") {
+    const error = recordValue(response?.error ?? event.error);
     const code = error?.code;
-    if (code === REQUIRED_TOOL_CONTRACT_CODE && error?.retryable === false) return false;
+    // The required-tool guard synthesizes this terminal over output it held back from the client,
+    // so held text and reasoning are not evidence of anything sent; it keeps the retryability it
+    // carries. Any other output item (a tool call, an action) still commits it.
+    if (code === REQUIRED_TOOL_CONTRACT_CODE) {
+      if (response?.error != null && event.error != null) return false;
+      if (event.last_error != null || response?.last_error != null) return false;
+      return error?.retryable !== false && !incompleteCarriersVetoReplay(event, response)
+        && classifyIncompleteReplayReason(event, response) !== "veto"
+        && (emptyOutput || heldOnlyOutput(target.output, event.output));
+    }
+    if (!emptyOutput) return false;
     return !(typeof code === "string" && NON_REPLAYABLE_FAILED_CODES.has(code));
   }
-  if (event.type !== "response.incomplete") return false;
-  const reason = event.response?.incomplete_details?.reason;
-  // A terminal-only upstream can carry output without preceding delta/item events.
-  if (reason === undefined) return !Array.isArray(event.response?.output) || event.response.output.length === 0;
-  return typeof reason === "string" && RETRYABLE_ZERO_OUTPUT_INCOMPLETE_REASONS.has(reason);
+  const isIncomplete = event.type === "response.incomplete" || event.status === "incomplete";
+  if (!isIncomplete) return false;
+  if (!emptyOutput) return false;
+  // A pause or explicit replay restriction takes precedence even when the reason is absent.
+  if (isPausedTurn(context) || incompleteCarriersVetoReplay(event, response)) return false;
+  return classifyIncompleteReplayReason(event, response) !== "veto";
 }
 
 /**
  * Decide when replaying the request on another combo target would risk duplicating
  * client-visible output or a tool-side effect. Unknown event types commit the child
- * conservatively; only the small Responses lifecycle preamble remains replayable.
+ * conservatively; only the small Responses lifecycle preamble and Codex metadata control frames
+ * remain replayable.
  */
 export function comboStreamPayloadCommitsOutput(payload: unknown): boolean {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return true;
+  if (responsesFrameIsReplayUnsafe(payload as Record<string, unknown>)) return true;
   const type = (payload as { type?: unknown }).type;
   if (typeof type !== "string") return true;
-  if (type === "response.created") {
-    // A created event is a control frame only while its snapshot is empty. An origin that
-    // resumes a turn can put completed items in it, and treating that as a prelude would let
-    // a replacement re-emit output the caller already received.
-    const response = (payload as { response?: unknown }).response;
+  if (PRE_OUTPUT_CONTROL_EVENTS.has(type)) {
+    // Lifecycle snapshots may already carry output or an error. Neither can be discarded
+    // for a replacement, even if the event name otherwise describes only a prelude.
+    const event = payload as Record<string, unknown>;
+    const conflictingStatus = (status: unknown) => status != null && status !== "queued" && status !== "in_progress";
+    if (Object.keys(event).some(key => !PRE_OUTPUT_EVENT_FIELDS.has(key))) return true;
+    if (event.sequence_number !== undefined && !(typeof event.sequence_number === "number"
+      && Number.isSafeInteger(event.sequence_number) && event.sequence_number >= 0)) return true;
+    if (event.error != null || event.last_error != null || event.incomplete_details != null
+      || event.item != null || event.delta != null || event.content != null
+      || event.message != null || event.code != null || conflictingStatus(event.status)) return true;
+    if (event.output !== undefined && (!Array.isArray(event.output) || event.output.length > 0)) return true;
+    const response = event.response;
+    if (response != null && (typeof response !== "object" || Array.isArray(response))) return true;
     if (response && typeof response === "object" && !Array.isArray(response)) {
-      const output = (response as { output?: unknown }).output;
-      if (Array.isArray(output) && output.length > 0) return true;
+      const snapshot = response as Record<string, unknown>;
+      if (Object.keys(snapshot).some(key => !PRE_OUTPUT_SNAPSHOT_FIELDS.has(key))) return true;
+      if (!snapshotMetadataIsSafe(snapshot)) return true;
+      if (snapshot.output !== undefined && (!Array.isArray(snapshot.output) || snapshot.output.length > 0)) return true;
+      if (snapshot.error != null || snapshot.last_error != null || snapshot.incomplete_details != null
+        || conflictingStatus(snapshot.status)) return true;
+      if (snapshot.completed_at != null || (snapshot.end_turn != null && snapshot.end_turn !== false)
+        || (snapshot.background != null && snapshot.background !== false)
+        || (snapshot.store != null && snapshot.store !== false) || snapshot.previous_response_id != null) return true;
     }
   }
-  return !PRE_OUTPUT_CONTROL_EVENTS.has(type) && !TERMINAL_EVENTS.has(type);
+  if (type === "response.output_text.delta") {
+    const delta = (payload as { delta?: unknown }).delta;
+    if (delta === undefined || (typeof delta === "string" && delta.length === 0)) return false;
+  }
+  return !PRE_OUTPUT_CONTROL_EVENTS.has(type) && !CODEX_METADATA_CONTROL_EVENTS.has(type)
+    && !TERMINAL_EVENTS.has(type);
 }
 
 /**
@@ -191,17 +559,24 @@ function observedResponsesStage(state: {
   return "headers-only";
 }
 
-function replayBufferedResponse(
+/** A released replay slot. */
+const EMPTY_CHUNK = new Uint8Array(0);
+
+/** Exported for its regression tests (#8601). */
+export function replayBufferedResponse(
   response: Response,
   reader: ReadableStreamDefaultReader<Uint8Array>,
   buffered: Uint8Array[],
   pendingRead?: ReturnType<typeof reader.read>,
 ): Response {
   let index = 0;
-  const body = new ReadableStream<Uint8Array>({
+  const body = carryPacedStream(response.body, new ReadableStream<Uint8Array>({
     async pull(controller) {
       if (index < buffered.length) {
-        controller.enqueue(buffered[index++]!);
+        // Hand each replayed chunk over once: the replay keeps no reference to a prefix the client already took (#8601).
+        const chunk = buffered[index]!;
+        buffered[index++] = EMPTY_CHUNK;
+        controller.enqueue(chunk);
         return;
       }
       try {
@@ -214,9 +589,10 @@ function replayBufferedResponse(
       }
     },
     cancel(reason) {
+      buffered.fill(EMPTY_CHUNK);
       reader.cancel(reason).catch(() => undefined);
     },
-  });
+  }, pacedQueuingStrategy(response.body)));
   return carryResponseToolOwnership(response, new Response(body, {
     status: response.status,
     statusText: response.statusText,
@@ -228,17 +604,24 @@ function failedTerminalResponse(
   response: Response,
   terminalPayload: Record<string, unknown>,
   logCtx: RequestLogContext,
+  collectUsage: boolean,
 ): Response {
-  const nested = terminalPayload.response;
-  const terminalResponse = nested && typeof nested === "object" && !Array.isArray(nested)
-    ? nested as Record<string, unknown>
-    : {};
-  const nestedError = terminalResponse.error;
+  const nested = recordValue(terminalPayload.response);
+  const terminalResponse = nested ?? terminalPayload;
+  const zeroOutputLimit = (terminalPayload.type === "response.incomplete" || terminalPayload.status === "incomplete")
+    && classifyIncompleteReplayReason(terminalPayload, nested) === "output-limit";
+  const nestedError = nested?.error;
   const topLevelError = terminalPayload.error;
   const error = nestedError && typeof nestedError === "object" && !Array.isArray(nestedError)
     ? nestedError as Record<string, unknown>
     : topLevelError && typeof topLevelError === "object" && !Array.isArray(topLevelError)
       ? topLevelError as Record<string, unknown>
+    : isOpenRouterOpaque400Record(terminalPayload)
+      ? {
+        message: terminalPayload.message,
+        code: terminalPayload.code,
+        metadata: terminalPayload.metadata,
+      }
     : {
       // A caller-validated flat error can carry its identity beside type:error.
       // Retain it when that caller established a 400, rather than discarding the
@@ -246,18 +629,27 @@ function failedTerminalResponse(
       type: terminalPayload.type === "error" && logCtx.terminalHttpStatus === 400
         ? "invalid_request_error" : "upstream_error",
       code: terminalPayload.type === "error" && logCtx.terminalHttpStatus === 400
-        ? (typeof terminalPayload.code === "string" ? terminalPayload.code : null) : "upstream_server_error",
+        ? (typeof terminalPayload.code === "string"
+            ? terminalPayload.code
+            : typeof terminalPayload.code === "number" && Number.isFinite(terminalPayload.code)
+              ? String(terminalPayload.code)
+              : null)
+        : zeroOutputLimit ? "zero_output_token_limit" : "upstream_server_error",
       message: typeof terminalPayload.message === "string"
         ? terminalPayload.message
-        : logCtx.upstreamError ?? "Provider stream failed before producing output",
+        : zeroOutputLimit
+          ? "Provider reached its output token limit before producing output"
+          : logCtx.upstreamError ?? "Provider stream failed before producing output",
     };
   const headers = new Headers(response.headers);
   headers.set("content-type", "application/json");
   headers.delete("content-length");
   headers.delete("content-encoding");
-  const usage = terminalResponse.usage;
+  const usage = collectUsage && !logCtx.usageFromBridge && !logCtx.clientResponseUsage
+    ? terminalResponse.usage : undefined;
   return new Response(JSON.stringify({
     error,
+    ...(typeof terminalPayload.detail === "string" ? { detail: terminalPayload.detail } : {}),
     // The combo classifier needs only the error and optional usage. Do not carry
     // response ids, provider metadata, or future terminal fields into the client
     // error envelope merely because they shared the terminal snapshot.
@@ -266,7 +658,14 @@ function failedTerminalResponse(
       ...(usage && typeof usage === "object" && !Array.isArray(usage) ? { usage } : {}),
     },
   }), {
-    status: logCtx.terminalHttpStatus ?? bareErrorStatus(terminalPayload) ?? 502,
+    // A structured moderation verdict on any carrier (`error` or `response.failed`) is the
+    // request-level 400 the HTTP and native readers judge it as. The verdict already vetoes any
+    // stated status other than 400/422, so this only replaces a status the log tap inferred (the
+    // synthetic 502 for an unrecognized code).
+    status: (logCtx.terminalHttpStatus !== 400 && logCtx.terminalHttpStatus !== 422
+      && isProviderModerationRefusal(400, JSON.stringify(terminalPayload), undefined, true))
+      ? 400
+      : logCtx.terminalHttpStatus ?? bareErrorStatus(terminalPayload) ?? 502,
     headers,
   });
 }
@@ -281,7 +680,9 @@ export type ComboStreamPreflightResult =
    * a projected terminal can treat this exactly as `accepted`, which is what it was before
    * the stage became observable.
    */
-  | { kind: "read-error"; response: Response; error: unknown; stage: RequestFailureStage };
+  | { kind: "read-error"; response: Response; error: unknown; stage: RequestFailureStage }
+  /** A clean EOF after control frames, retained for an explicitly opted-in recovery owner. */
+  | { kind: "pre-output-eof"; response: Response; error: ProtocolPreOutputEof; stage: RequestFailureStage };
 
 /**
  * Buffer a Responses SSE only until the request becomes unsafe to replay or reaches a
@@ -293,13 +694,25 @@ export type ComboStreamPreflightResult =
 export async function preflightComboStreamResponse(
   response: Response,
   logCtx: RequestLogContext,
-  retryableTerminal: (payload: unknown) => boolean = retryableZeroOutputTerminal,
-  options?: { allowMissingContentType?: boolean; replayReadErrors?: boolean; requiredToolPrelude?: boolean; signal?: AbortSignal },
+  retryableTerminal?: (payload: unknown) => boolean,
+  options?: {
+    allowMissingContentType?: boolean;
+    replayReadErrors?: boolean;
+    replayCleanEof?: boolean;
+    requiredToolPrelude?: boolean;
+    degeneratePrelude?: boolean;
+    signal?: AbortSignal;
+    onUpstreamActivity?: () => void;
+  },
 ): Promise<ComboStreamPreflightResult> {
+  const retryableTerminalFor = retryableTerminal ?? ((payload: unknown) => retryableZeroOutputTerminal(payload, logCtx));
   const contentType = response.headers.get("content-type");
   const isEventStream = hasResponseMediaType(response.headers, "text/event-stream")
     || (!contentType && options?.allowMissingContentType === true);
-  if (!response.ok || !response.body || !isEventStream) {
+  if (!response.ok || !response.body) {
+    return { kind: "accepted", response };
+  }
+  if (!isEventStream) {
     return { kind: "accepted", response };
   }
 
@@ -313,40 +726,85 @@ export async function preflightComboStreamResponse(
   let responseCreated = false;
   let terminalStatus: ResponsesTerminalStatus | undefined;
   let retryableTerminalPayload: Record<string, unknown> | undefined;
+  let degenerateTerminalPayload: Record<string, unknown> | undefined;
+  const commentaryItemIds = new Set<string>();
   let holdTimer: ReturnType<typeof setTimeout> | undefined;
   let holdDeadline: Promise<"hold-expired"> | undefined;
+  // Native delivery already inspects raw usage; these bytes may contain display estimates.
+  const collectUsage = !isNativePassthroughSseResponse(response);
   const inspector = createSseInspector({
     logCtx,
+    collectUsage,
+    onFrame: frame => {
+      if (terminalStatus === undefined && !outputCommitted && !retryableTerminalPayload
+        && ambiguousSseFrame(frame)) outputCommitted = true;
+    },
     // A payload the inspector could not parse still reached this proxy, and it may be output.
     // Committing on it is what keeps an unreadable frame from reading as an empty prelude.
     onOpaquePayload: () => { outputCommitted = true; },
     onParsedPayload: payload => {
       if (terminalStatus !== undefined || outputCommitted || retryableTerminalPayload) return;
-      if (payload !== null && typeof payload === "object" && !Array.isArray(payload)
-        && (payload as { type?: unknown }).type === "response.created") responseCreated = true;
-      const retryable = retryableTerminal(payload);
-      const matchedBareError = retryable && payload !== null && typeof payload === "object"
-        && !Array.isArray(payload) && (payload as { type?: unknown }).type === "error";
-      // A zero-output bare error is terminal evidence. Explicit client errors stay
-      // committed; unknown and retryable upstream failures may advance the combo.
-      const heldReasoning = options?.requiredToolPrelude && requiredToolReasoningPrelude(payload);
-      if (heldReasoning) holdDeadline ??= new Promise(resolve => {
-        holdTimer = setTimeout(() => resolve("hold-expired"), COMBO_REQUIRED_TOOL_REASONING_HOLD_MS);
-      });
-      if (comboStreamPayloadCommitsOutput(payload) && !matchedBareError && !heldReasoning) outputCommitted = true;
-      if (options?.requiredToolPrelude && payload && typeof payload === "object") {
-        const event = payload as { type?: unknown; response?: { output?: unknown; error?: { code?: unknown; retryable?: unknown } } };
-        const output = event.response?.output;
-        const contractFailure = event.type === "response.failed" && event.response?.error?.code === REQUIRED_TOOL_CONTRACT_CODE
-          && event.response.error.retryable !== false && Array.isArray(output) && output.every(item =>
-            item !== null && typeof item === "object" && !Array.isArray(item)
-            && ["message", "reasoning"].includes((item as { type: string }).type));
-        // Other lifecycle/terminal snapshots can hide effects too. Only our checked contract
-        // failure may discard a terminal-only text snapshot that was held in its entirety.
-        if (output !== undefined && (!Array.isArray(output) || output.length > 0) && !contractFailure) outputCommitted = true;
+      // A provider verdict commits even when it resembles a retryable zero-output failure.
+      if (responsesCompletionError(payload) != null) {
+        outputCommitted = true;
+        return;
       }
-      if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
-      if (retryable) retryableTerminalPayload = payload as Record<string, unknown>;
+      try {
+        const event = payload !== null && typeof payload === "object" && !Array.isArray(payload)
+          ? payload as Record<string, unknown> : undefined;
+        if (event && responsesFrameIsReplayUnsafe(event)) {
+          outputCommitted = true;
+          return;
+        }
+        if (event?.type === "response.created") responseCreated = true;
+        const retryable = retryableTerminalFor(payload);
+        const matchedBareError = retryable && payload !== null && typeof payload === "object"
+          && !Array.isArray(payload) && (payload as { type?: unknown }).type === "error";
+        // A zero-output bare error is terminal evidence. Explicit client errors stay
+        // committed; unknown and retryable upstream failures may advance the combo.
+        const heldReasoning = options?.degeneratePrelude === true
+          ? comboStreamDegeneratePrelude(payload, commentaryItemIds)
+          : options?.requiredToolPrelude && requiredToolReasoningPrelude(payload);
+        if (options?.degeneratePrelude || options?.requiredToolPrelude) holdDeadline ??= new Promise(resolve => {
+          holdTimer = setTimeout(() => resolve("hold-expired"), COMBO_STREAM_PRELUDE_HOLD_MS);
+        });
+        const degenerateTerminal = options?.degeneratePrelude === true
+          && isDegenerateStreamTerminal(payload, logCtx);
+        if (comboStreamPayloadCommitsOutput(payload) && !matchedBareError && !heldReasoning) outputCommitted = true;
+        if (options?.requiredToolPrelude && payload && typeof payload === "object") {
+          const event = payload as { type?: unknown; response?: { output?: unknown; error?: { code?: unknown; retryable?: unknown } } };
+          const output = event.response?.output;
+          const contractFailure = event.type === "response.failed" && event.response?.error?.code === REQUIRED_TOOL_CONTRACT_CODE
+            && event.response.error.retryable !== false && Array.isArray(output) && output.every(item =>
+              item !== null && typeof item === "object" && !Array.isArray(item)
+              && ["message", "reasoning"].includes((item as { type: string }).type));
+          // Other lifecycle/terminal snapshots can hide effects too. Only our checked contract
+          // failure may discard a terminal-only text snapshot that was held in its entirety.
+          if (output !== undefined && (!Array.isArray(output) || output.length > 0) && !contractFailure && !degenerateTerminal) outputCommitted = true;
+        }
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
+        if (retryable) retryableTerminalPayload = payload as Record<string, unknown>;
+        if (degenerateTerminal && !degenerateTerminalPayload) {
+          const response = recordValue((payload as Record<string, unknown>).response);
+          degenerateTerminalPayload = {
+            ...(payload as Record<string, unknown>),
+            response: {
+              ...(response ?? {}),
+              error: {
+                type: "upstream_error",
+                code: COMBO_DEGENERATE_COMPLETION_CODE,
+                message: "Combo target ended the turn with only reasoning/commentary prelude — no tool call or final answer",
+              },
+            },
+          };
+        }
+      } catch {
+        // The generic inspector swallows observer errors. Replay requires a successful proof
+        // of no effects, so a failed classification keeps this attempt and its original bytes.
+        outputCommitted = true;
+        retryableTerminalPayload = undefined;
+        degenerateTerminalPayload = undefined;
+      }
     },
     onTerminal: status => { terminalStatus = status; },
   });
@@ -367,16 +825,31 @@ export async function preflightComboStreamResponse(
         next = observed;
       } catch (error) {
         if (!options?.replayReadErrors) throw error;
+        // A rejected read can leave an output, terminal or opaque frame buffered
+        // in the inspector. Flush it before deciding whether recovery is safe.
+        inspector.finish();
         // The native relay still owns post-header transport failures. Preserve
         // the bounded prefix and the errored reader; cancelling it here would
         // erase the failure before either client relay or inspection sees it.
         const replay = replayBufferedResponse(response, reader, buffered);
+        if (outputCommitted || terminalStatus !== undefined || retryableTerminalPayload) {
+          return { kind: "accepted", response: replay };
+        }
         const stage = observedResponsesStage({ outputCommitted, terminalStatus, responseCreated });
         return { kind: "read-error", response: replay, error, stage };
       }
       if (next.done) {
         inspector.finish();
+        if (options?.replayCleanEof && !outputCommitted && terminalStatus === undefined) {
+          return {
+            kind: "pre-output-eof",
+            response: replayBufferedResponse(response, reader, buffered),
+            error: new ProtocolPreOutputEof(),
+            stage: observedResponsesStage({ outputCommitted, terminalStatus, responseCreated }),
+          };
+        }
       } else {
+        if (next.value.byteLength > 0) options?.onUpstreamActivity?.();
         if (bufferedBytes + next.value.byteLength > COMBO_STREAM_PREFLIGHT_MAX_BYTES) {
           // Keep the cap about memory the preflight allocates. The upstream chunk already exists;
           // copying it before committing would transiently exceed the boundary for no
@@ -393,15 +866,29 @@ export async function preflightComboStreamResponse(
       }
 
       // A bare error event is not a protocol terminal (terminalStatus stays undefined),
-      // so its retryable classification doubles as the terminal evidence.
+      // so its retryable classification doubles as the terminal evidence. A degenerate
+      // terminal carries the same hop evidence: its buffered prelude never reached the
+      // client, so discarding it cannot duplicate anything the caller already saw.
+      const hopEvidence = retryableTerminalPayload ?? degenerateTerminalPayload;
       if ((terminalStatus === "failed" || terminalStatus === "incomplete"
-        || retryableTerminalPayload?.type === "error")
-        && !outputCommitted && retryableTerminalPayload) {
+        || hopEvidence?.type === "error" || degenerateTerminalPayload !== undefined)
+        && !outputCommitted && hopEvidence !== undefined) {
         await reader.cancel("retrying zero-output combo stream terminal").catch(() => undefined);
-        const failed = failedTerminalResponse(response, retryableTerminalPayload, logCtx);
+        const failed = failedTerminalResponse(response, hopEvidence, logCtx, collectUsage);
+        // The rebuilt envelope keeps only the record. When either the whole frame or that slim
+        // envelope reads as a moderation verdict, the combo loop must judge the whole frame: a
+        // verdict needs the evidence the envelope dropped (a root code, an innererror), and a veto
+        // the envelope dropped (a root verdict, a nested hard code) must not turn into a hop.
+        if (failed.status === 400 || failed.status === 422) {
+          const whole = JSON.stringify(hopEvidence);
+          if (isProviderModerationRefusal(failed.status, whole, undefined, true)
+            || isProviderModerationRefusal(failed.status, await failed.clone().text(), undefined, true)) {
+            attachComboFailureEvidence(failed, whole);
+          }
+        }
         return { kind: "failed", response: failed,
           ...(failed.status === 400
-            ? { codexModelRefusal: terminalModelRefusal(failed.status, retryableTerminalPayload) } : {}) };
+            ? { codexModelRefusal: terminalModelRefusal(failed.status, hopEvidence) } : {}) };
       }
       if (next.done || terminalStatus !== undefined || outputCommitted
         || bufferedBytes >= COMBO_STREAM_PREFLIGHT_MAX_BYTES
@@ -420,27 +907,144 @@ export async function preflightComboStreamResponse(
 export type ProtocolSafeResetRecovery = (
   error: unknown,
   stage: RequestFailureStage,
+  signal: AbortSignal,
+  /** Whether the selection can still publish this candidate; it narrows once a head is committed. */
+  accepts: (candidate: Response) => boolean,
 ) => Promise<Response | null>;
 
 /**
- * Defer protocol inspection until the downstream actually pulls the body.
+ * The headers a committed head promises about the body that follows it.
  *
- * Direct passthrough must return response headers before the first SSE event arrives, so the
- * inspection cannot be awaited at the dispatch site the way combo routing awaits it. Wrapping
- * the body moves it to the first pull, which is the earliest moment the client is willing to
- * wait anyway.
+ * A replacement never sends its own head: the client already has the original one, so only what
+ * the client reads to interpret the swapped body can matter here. Comparing the whole header set
+ * refused every real recovery, because origins vary `date`, `x-request-id`, `cf-ray`,
+ * `server-timing`, the quota headers and `content-length` per attempt; those describe the
+ * attempt that answered, not the response identity, and the client already holds the original's
+ * values. Hop-by-hop headers are listed for the same reason: the connection is the proxy's.
+ *
+ * What is left is the identity a mismatched body would corrupt:
+ * - `openai-model` is the model the origin actually served. A body produced by a different
+ *   served model behind a head that advertised the first one mislabels the turn for the client's
+ *   follow-ups and for usage attribution.
+ * - `x-codex-turn-state` is this proxy's own handle, bound at issuance to the caller, provider
+ *   and outbound account and redeemed back to the upstream turn token only at the physical send
+ *   of a matching request (`src/server/turn-state-handles.ts`). Publishing a replacement body
+ *   under the original handle would redeem the client's next turn against a different turn state
+ *   than the one that produced the body, which is exactly the conversation corruption the handle
+ *   exists to prevent.
+ *
+ * Everything else is ignored on purpose: `date`, `x-request-id`, `request-id`, `cf-ray`,
+ * `server-timing`, `x-ratelimit-*`, `openai-processing-ms`, `content-length`,
+ * `transfer-encoding`, `connection` and `keep-alive`, plus any provider header the client
+ * never interprets.
  */
-export function deferProtocolSafeResetRecovery(
+const DEFERRED_IDENTITY_HEADERS: readonly string[] = ["openai-model", "x-codex-turn-state"];
+
+const headerMediaType = (headers: Headers): string =>
+  headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+
+/**
+ * Whether a replacement body may be published behind an already committed head on the clean
+ * pre-output EOF path. A deferred body cannot change the head, so it must at least agree on the
+ * identity subset above.
+ */
+export function sameDeferredResponseIdentity(original: Response, replacement: Response): boolean {
+  if (original.status !== replacement.status || original.statusText !== replacement.statusText) return false;
+  if (headerMediaType(original.headers) !== headerMediaType(replacement.headers)) return false;
+  return DEFERRED_IDENTITY_HEADERS.every(name => (original.headers.get(name) ?? "") === (replacement.headers.get(name) ?? ""));
+}
+
+export interface DeferredResetRecoveryOptions {
+  allowMissingContentType?: boolean;
+  heartbeatIntervalMs?: number;
+  /**
+   * `periodic` comments a waiting client once per heartbeat. `upstream-activity` comments only when
+   * the upstream reads non-empty bytes or a replacement head lands behind a committed head, for a
+   * consumer whose silence clock sees only delivered bytes; its owner still bounds real silence.
+   */
+  keepalive?: "periodic" | "upstream-activity" | "none";
+}
+
+/** Which physical attempt produced the head a reset selection published. */
+export type ResetSelectionOwner = "original" | "replacement";
+
+export interface ResetSelectionOptions extends DeferredResetRecoveryOptions {
+  /** Upper bound on the pre-head wait. The wait never exceeds one heartbeat interval either. */
+  maxSelectionMs?: number;
+  /**
+   * Upper bound on how long the original's own inspection may hold the head. When it expires
+   * before the original settles, the original head is committed and inspection continues behind
+   * it. A replacement requested after the original failed inside this window is still bounded by
+   * `maxSelectionMs`, because no healthy source is waiting behind that head.
+   */
+  inspectionWindowMs?: number;
+  /** Ends the selection, the committed hold and an in-flight replacement without awaiting cleanup. */
+  signal?: AbortSignal;
+  /** Called once, synchronously, before the caller receives the published response. */
+  onCommit?: (published: Response, owner: ResetSelectionOwner) => void;
+}
+
+const positiveMs = (value: number | undefined): number | undefined =>
+  value !== undefined && Number.isFinite(value) && value > 0 ? value : undefined;
+
+// A fresh chunk per enqueue: a consumer may transfer the buffer it receives.
+const resetPreflightKeepalive = (): Uint8Array => new TextEncoder().encode(": keepalive\n\n");
+
+/**
+ * One protocol preflight and at most one replacement for a native SSE body, behind a head that is
+ * either still open (`early`) or already committed. While the head is open, any replacement the
+ * caller's recovery accepts can be published with its own status and headers. Once a head is
+ * committed, acceptance depends on how the stream ended: a read error keeps the permissive
+ * replacement behaviour the reset lane has always had, while a clean pre-output EOF must agree on
+ * the deferred identity subset. The original keeps its bytes and error when nothing is accepted.
+ */
+function createResetSelection(
   response: Response,
   logCtx: RequestLogContext,
   recover: ProtocolSafeResetRecovery,
-  options?: { allowMissingContentType?: boolean },
-): Response {
-  if (!response.body) return response;
-
+  options: ResetSelectionOptions | undefined,
+  early: boolean,
+): { held: Response; selected?: Promise<Response> } {
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let selection: { response: Response; owner: ResetSelectionOwner } | undefined;
   let initialization: Promise<void> | undefined;
+  let initializationResult: { kind: "ready" } | { kind: "failed"; error: unknown } | undefined;
+  let notifyInitialization: (() => void) | undefined;
+  let commitEarly: ((published: Response, owner: ResetSelectionOwner) => void) | undefined;
+  let inspectionTimer: ReturnType<typeof setTimeout> | undefined;
+  const endInspectionWindow = (): void => {
+    if (inspectionTimer !== undefined) clearTimeout(inspectionTimer);
+    inspectionTimer = undefined;
+  };
+  let activityPending = false;
+  // A replacement head behind a committed head is upstream activity the held stream must report.
+  let replacementHeadPending = false;
+  let heartbeatDue = false;
   let closed = false;
+  let headCommitted = !early;
+  let output!: ReadableStreamDefaultController<Uint8Array>;
+  const preflightAbort = new AbortController();
+  const heartbeatMs = positiveMs(options?.heartbeatIntervalMs) ?? RESET_PREFLIGHT_HEARTBEAT_MS;
+  const keepalive = options?.keepalive ?? "periodic";
+  const signal = options?.signal;
+  /**
+   * Acceptance narrows with the failure, not with the selection alone.
+   *
+   * A read error is the reset the recovery lane has always served: the transport died, the
+   * upstream attempt is over, and whatever a fresh attempt produced stands in for it. Nothing
+   * about the replacement's metadata can be inferred from the original's, because a real origin
+   * varies `date`, request ids and quota headers on every attempt, so requiring equality made
+   * the recovery unreachable.
+   *
+   * A clean pre-output EOF is different: the origin closed a healthy stream after its lifecycle
+   * events, so the bytes that follow are a different attempt's answer to the same turn. Behind a
+   * committed head it still has to agree on the identity subset that describes what the client
+   * will read.
+   */
+  const acceptsFor = (kind: "read-error" | "pre-output-eof"): ((candidate: Response) => boolean) =>
+    kind === "pre-output-eof"
+      ? (candidate: Response) => !headCommitted || sameDeferredResponseIdentity(response, candidate)
+      : () => true;
 
   const cancelBody = (body: ReadableStream<Uint8Array> | null, reason?: unknown): void => {
     try { void body?.cancel(reason).catch(() => {}); } catch { /* already locked or closed */ }
@@ -450,31 +1054,104 @@ export function deferProtocolSafeResetRecovery(
       response,
       logCtx,
       () => false,
-      { allowMissingContentType: options?.allowMissingContentType === true, replayReadErrors: true },
+      { allowMissingContentType: options?.allowMissingContentType === true, replayReadErrors: true,
+        replayCleanEof: true, signal: preflightAbort.signal,
+        onUpstreamActivity: keepalive === "upstream-activity" ? () => {
+          activityPending = true;
+          notifyInitialization?.();
+        } : undefined },
     );
-    let selected = preflight.response;
-    if (preflight.kind === "read-error") {
-      const replacement = await recover(preflight.error, preflight.stage);
+    // The original settled, so it no longer holds the head; only a replacement can from here.
+    endInspectionWindow();
+    let chosen: { response: Response; owner: ResetSelectionOwner } = { response: preflight.response, owner: "original" };
+    if (!closed && (preflight.kind === "read-error" || preflight.kind === "pre-output-eof")) {
+      const accepts = acceptsFor(preflight.kind);
+      const replacement = await recover(preflight.error, preflight.stage, preflightAbort.signal, accepts);
       if (replacement) {
-        cancelBody(selected.body, "using protocol-safe replacement stream");
-        selected = replacement;
+        // Checked again here: the head may have been committed while the replacement was in flight.
+        if (!closed && accepts(replacement)) {
+          cancelBody(chosen.response.body, "using protocol-safe replacement stream");
+          chosen = { response: replacement, owner: "replacement" };
+          replacementHeadPending = headCommitted && keepalive === "upstream-activity";
+        } else {
+          cancelBody(replacement.body, "declining protocol-safe replacement stream");
+          if (!closed) console.warn("[upstream-retry] replacement response metadata differs from the committed head; preserving original stream");
+        }
       }
     }
     if (closed) {
-      cancelBody(selected.body, "downstream cancelled before protocol preflight completed");
+      cancelBody(chosen.response.body, "downstream cancelled before protocol preflight completed");
       return;
     }
-    reader = selected.body?.getReader();
+    selection = chosen;
   };
+  const start = (): Promise<void> => initialization ??= initialize().then(
+    () => { initializationResult = { kind: "ready" }; notifyInitialization?.(); },
+    error => { initializationResult = { kind: "failed", error }; notifyInitialization?.(); },
+  );
+  const detach = (): void => signal?.removeEventListener("abort", onAbort);
+  const release = (reason: unknown): boolean => {
+    if (closed) return false;
+    closed = true;
+    detach();
+    preflightAbort.abort(reason);
+    notifyInitialization?.();
+    if (reader) {
+      try { void reader.cancel(reason).catch(() => {}); } catch { /* already closed */ }
+      try { reader.releaseLock(); } catch { /* already released */ }
+      reader = undefined;
+    } else if (selection) {
+      cancelBody(selection.response.body, reason);
+    } else if (initialization === undefined) {
+      // Nothing has read the upstream yet, so this body is still ours to cancel.
+      cancelBody(response.body, reason);
+    }
+    // Otherwise aborting cancels the preflight's locked reader or the in-flight replacement, and
+    // initialization releases whichever body it ends up choosing. Nothing here awaits cleanup.
+    return true;
+  };
+  function onAbort(): void {
+    const reason = signal?.reason;
+    if (release(reason)) {
+      try { output.error(reason); } catch { /* already closed */ }
+    }
+    commitEarly?.(held, "original");
+  }
 
   const body = new ReadableStream<Uint8Array>({
+    start(controller) { output = controller; },
     async pull(controller) {
       try {
-        initialization ??= initialize();
-        await initialization;
+        void start();
+        // Keep only one waiter on the initialization; racing it afresh for every heartbeat
+        // would retain one promise callback per interval until a quiet upstream settles.
+        if (initializationResult === undefined && !heartbeatDue && !(keepalive === "upstream-activity" && activityPending)) {
+          await new Promise<void>(resolve => {
+            const timer = keepalive === "periodic"
+              ? setTimeout(() => { notifyInitialization = undefined; resolve(); }, heartbeatMs)
+              : undefined;
+            notifyInitialization = () => { if (timer !== undefined) clearTimeout(timer); notifyInitialization = undefined; resolve(); };
+          });
+        }
         if (closed) return;
+        if (initializationResult === undefined) {
+          activityPending = false;
+          heartbeatDue = false;
+          controller.enqueue(resetPreflightKeepalive());
+          return;
+        }
+        if (initializationResult.kind === "failed") throw initializationResult.error;
+        if (replacementHeadPending) {
+          // A buffered consumer's silence clock sees only delivered bytes. Without this, a quiet
+          // replacement would inherit the original's last activity and be cut short.
+          replacementHeadPending = false;
+          controller.enqueue(resetPreflightKeepalive());
+          return;
+        }
+        reader ??= selection?.response.body?.getReader();
         if (!reader) {
           closed = true;
+          detach();
           controller.close();
           return;
         }
@@ -482,6 +1159,7 @@ export function deferProtocolSafeResetRecovery(
         if (closed) return;
         if (next.done) {
           closed = true;
+          detach();
           try { reader.releaseLock(); } catch { /* already released */ }
           reader = undefined;
           controller.close();
@@ -491,32 +1169,104 @@ export function deferProtocolSafeResetRecovery(
       } catch (error) {
         if (closed) return;
         closed = true;
+        detach();
         try { reader?.releaseLock(); } catch { /* errored reader */ }
         reader = undefined;
         controller.error(error);
       }
     },
     cancel(reason) {
-      if (closed) return;
-      closed = true;
-      if (reader) {
-        try { void reader.cancel(reason).catch(() => {}); } catch { /* already closed */ }
-        try { reader.releaseLock(); } catch { /* already released */ }
-        reader = undefined;
-      } else if (initialization === undefined) {
-        // Nothing has read the upstream yet, so this body is still ours to cancel.
-        cancelBody(response.body, reason);
-      }
-      // A cancel while the preflight is mid-flight falls through deliberately. That body is
-      // locked by the preflight's own reader, so cancelling it here would reject and be
-      // swallowed; `initialize` sees `closed` when it settles and releases whichever body it
-      // ended up selecting, which is the one that actually has to be let go.
+      release(reason);
     },
   }, { highWaterMark: 0 });
-
-  return new Response(body, {
+  const held = carryResponseToolOwnership(response, new Response(body, {
     status: response.status,
     statusText: response.statusText,
     headers: response.headers,
+  }));
+
+  if (!early) {
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
+    return { held };
+  }
+  const selected = new Promise<Response>(resolve => {
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    commitEarly = (published, owner) => {
+      commitEarly = undefined;
+      headCommitted = true;
+      if (deadline !== undefined) clearTimeout(deadline);
+      endInspectionWindow();
+      // A published selection owns its own body; the hold and its abort hook are finished.
+      if (published !== held) detach();
+      try { options?.onCommit?.(published, owner); } finally { resolve(published); }
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const deadlineMs = Math.min(heartbeatMs, positiveMs(options?.maxSelectionMs) ?? Infinity);
+    deadline = setTimeout(() => {
+      // The client has waited one heartbeat interval for a head; its first read gets a keepalive.
+      if (keepalive === "periodic") heartbeatDue = true;
+      commitEarly?.(held, "original");
+    }, deadlineMs);
+    const inspectionMs = positiveMs(options?.inspectionWindowMs);
+    // A quiet original is a healthy slow response as often as a dying one; its head goes out now.
+    // Bun's server writes a head only with the first body bytes, so the held body owes a comment.
+    if (inspectionMs !== undefined && inspectionMs < deadlineMs) {
+      inspectionTimer = setTimeout(() => {
+        inspectionTimer = undefined;
+        if (keepalive === "periodic") heartbeatDue = true;
+        commitEarly?.(held, "original");
+      }, inspectionMs);
+    }
+    void start().then(() => {
+      if (selection && !closed) commitEarly?.(selection.response, selection.owner);
+      else commitEarly?.(held, "original");
+    });
   });
+  return { held, selected };
+}
+
+/**
+ * Defer protocol inspection behind a head the caller has already committed.
+ *
+ * The inspection starts at the first pull. A replacement behind the committed head is published
+ * for a read error (the reset lane's long-standing behaviour) and, for a clean pre-output EOF,
+ * only when it agrees on the deferred identity subset (status, status text, media type,
+ * `openai-model`, `x-codex-turn-state`).
+ */
+export function deferProtocolSafeResetRecovery(
+  response: Response,
+  logCtx: RequestLogContext,
+  recover: ProtocolSafeResetRecovery,
+  options?: DeferredResetRecoveryOptions,
+): Response {
+  if (!response.body) return response;
+  return createResetSelection(response, logCtx, recover, options, false).held;
+}
+
+/**
+ * Choose the native response before its head is committed, within one heartbeat interval or the
+ * shorter `inspectionWindowMs` while the original itself is still being inspected.
+ *
+ * Inspection starts immediately. If selection finishes first, the caller receives the selected
+ * response, a replacement included, with its own status and headers. If the deadline wins, the
+ * caller receives the original head and the same preflight continues behind it, where a read
+ * error's replacement is accepted and a clean EOF's must agree on the identity subset.
+ * `onCommit` names which attempt owns the published head.
+ */
+export function selectProtocolSafeResetResponse(
+  response: Response,
+  logCtx: RequestLogContext,
+  recover: ProtocolSafeResetRecovery,
+  options: ResetSelectionOptions = {},
+): Promise<Response> {
+  if (!response.body) {
+    options.onCommit?.(response, "original");
+    return Promise.resolve(response);
+  }
+  return createResetSelection(response, logCtx, recover, options, true).selected!;
 }

@@ -106,7 +106,7 @@ test("request logging publishes one summary without persisting capture metadata"
 test("a concrete retry does not capture another logical request", () => {
   setContextCapture(true);
   const child: RequestLogContext = { provider: "fixture", model: "fixture-model" };
-  observeCacheDiagnosticInbound(child, body, headers, "caller", false);
+  observeCacheDiagnosticInbound(child, body, headers, "caller", undefined, false);
   expect(child.contextDraft).toBeUndefined();
 });
 

@@ -93,13 +93,19 @@ function sparseComboConfig<T extends {
   imageInput?: "auto" | "disabled";
   reasoningEffortMode?: "strict" | "adaptive";
   defaultEffortMode?: "fallback" | "force";
-}>(combo: T): Omit<T, "cooldownMs" | "waitForCooldownMs" | "cooldownWaitPolicy" | "imageInput" | "reasoningEffortMode" | "defaultEffortMode"> & {
+  jevEffortMode?: "decide" | "client";
+  capabilityPolicy?: "intersection" | "union";
+  onUnservable?: "degrade" | "reject";
+}>(combo: T): Omit<T, "cooldownMs" | "waitForCooldownMs" | "cooldownWaitPolicy" | "imageInput" | "reasoningEffortMode" | "defaultEffortMode" | "jevEffortMode" | "capabilityPolicy" | "onUnservable"> & {
   cooldownMs?: number;
   waitForCooldownMs?: number;
   cooldownWaitPolicy?: OcxComboCooldownWaitPolicy;
   imageInput?: "disabled";
   reasoningEffortMode?: "adaptive";
   defaultEffortMode?: "force";
+  jevEffortMode?: "client";
+  capabilityPolicy?: "union";
+  onUnservable?: "reject";
 } {
   const {
     cooldownMs,
@@ -108,6 +114,9 @@ function sparseComboConfig<T extends {
     imageInput,
     reasoningEffortMode,
     defaultEffortMode,
+    jevEffortMode,
+    capabilityPolicy,
+    onUnservable,
     ...rest
   } = combo;
   return {
@@ -122,6 +131,9 @@ function sparseComboConfig<T extends {
     ...(imageInput === "disabled" ? { imageInput: "disabled" as const } : {}),
     ...(reasoningEffortMode === "adaptive" ? { reasoningEffortMode: "adaptive" as const } : {}),
     ...(defaultEffortMode === "force" ? { defaultEffortMode: "force" as const } : {}),
+    ...(jevEffortMode === "client" ? { jevEffortMode: "client" as const } : {}),
+    ...(capabilityPolicy === "union" ? { capabilityPolicy: "union" as const } : {}),
+    ...(onUnservable === "reject" ? { onUnservable: "reject" as const } : {}),
   };
 }
 
@@ -165,6 +177,12 @@ function parseVisionSidecarTargets(
 /** Handle the `/api/combos` management routes (list, save, delete and related combo endpoints), validating and preserving the opt-in quota signal fields; null when no route matches. */
 export async function handleComboRoutes(ctx: ManagementContext): Promise<Response | null> {
   const { req, url, config, deps, convergeCodexCatalog, syncClaudeAgentDefsBestEffort } = ctx;
+
+  // Only the Combos page reads the suggested combos' excluded-provider list; load it on demand.
+  if (url.pathname === "/api/combo-suggestions" || url.pathname === "/api/combo-suggestions/save") {
+    const { handleComboSuggestionRoutes } = await import("./combo-suggestion-routes");
+    return handleComboSuggestionRoutes(ctx);
+  }
 
   if (url.pathname === "/api/combos" && req.method === "GET") {
     const { comboPublicModelId, getCombo, listComboIds } = await import("../../combos");
@@ -227,6 +245,7 @@ export async function handleComboRoutes(ctx: ManagementContext): Promise<Respons
         ? { cooldownReprobe: previous.cooldownReprobe }
         : {}),
       ...(!Object.hasOwn(requestedCombo, "decisionQuotaSignals") && requestedCombo.strategy === "jev" && previous?.decisionQuotaSignals !== undefined ? { decisionQuotaSignals: previous.decisionQuotaSignals } : {}),
+      ...(!Object.hasOwn(requestedCombo, "jevEffortMode") && requestedCombo.strategy === "jev" && previous?.jevEffortMode !== undefined ? { jevEffortMode: previous.jevEffortMode } : {}),
       ...(!Object.hasOwn(requestedCombo, "decisionQuotaTiers") && requestedCombo.strategy === "jev" && previous?.decisionQuotaTiers !== undefined ? { decisionQuotaTiers: previous.decisionQuotaTiers } : {}),
       // The dashboard does not edit the session pin (#7525): an omitted field keeps it on a JEV save.
       ...(!Object.hasOwn(requestedCombo, "sessionPin") && requestedCombo.strategy === "jev" && previous?.sessionPin != null ? { sessionPin: previous.sessionPin } : {}),
@@ -251,6 +270,12 @@ export async function handleComboRoutes(ctx: ManagementContext): Promise<Respons
         : {}),
       ...(!Object.hasOwn(requestedCombo, "imageInput") && previous?.imageInput !== undefined
         ? { imageInput: previous.imageInput }
+        : {}),
+      ...(!Object.hasOwn(requestedCombo, "capabilityPolicy") && previous?.capabilityPolicy !== undefined
+        ? { capabilityPolicy: previous.capabilityPolicy }
+        : {}),
+      ...(!Object.hasOwn(requestedCombo, "onUnservable") && previous?.onUnservable !== undefined
+        ? { onUnservable: previous.onUnservable }
         : {}),
       // #7229: the dashboard does not edit the row description, so a round trip that omits it
       // (including a rename) keeps it. An explicit empty string still clears it.

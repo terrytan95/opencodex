@@ -49,7 +49,7 @@ owns capture, capability authentication and child propagation.
 
 | Site | Hop point | Reactive status | Proactive |
 |---|---|---|---|
-| Combos, `src/server/responses/core-combo.ts` | top of the dispatch loop, when a later dispatch follows a failure on a different target; and before the first send of a `failover` combo that starts on a later target than its first, for any reason | the failure's status and `Retry-After` | `cooldown` or `quota_exhausted`, 429; otherwise `unavailable`, 503 (`comboTargetSkipTrigger`, `src/combos/resolve.ts`) |
+| Combos, `src/server/responses/core-combo.ts` | top of the dispatch loop, when a later dispatch follows a failure on a different target; and before the first send of a `failover` combo that starts on a later target than its first, for any reason (including a `capabilityPolicy: "union"` member that cannot accept this request's media or hold its input) | the failure's status and `Retry-After` | `cooldown` or `quota_exhausted`, 429; otherwise `unavailable`, 503 (`comboTargetSkipTrigger`, `src/combos/resolve.ts`) |
 | Routing profiles, `src/server/responses/policy-fallback.ts` | before the next ranked candidate runs | the failure's status and `Retry-After` | — |
 | Subagent model fallback, `src/codex/subagent-model-fallback.ts` | `applySubagentModelFallback`, before the spawn's model is rewritten; the caller in `src/server/responses/request-prepare.ts` returns the refusal | — | `unavailable`, 503 |
 | Main-account hard-lock fallback, `src/server/responses/main-hard-lock-routing.ts` | before the body is rewritten; `FallbackRefusedError` carries the refusal to `request-prepare.ts` | — | `hard_lock`, 429 |
@@ -135,8 +135,15 @@ privacy), `tests/responses/responses-combo-fallback-off.test.ts`, `tests/routing
 `tests/server/fallback-routes.test.ts`, `tests/clients/client-home-unreachable.test.ts`, `tests/cli/cli-fallback.test.ts`
 and `gui/tests/fallback-panel.test.tsx`.
 
+Combo target cooldowns persist across restarts: `src/combos/cooldown-store.ts` backs the map in `src/combos/failover.ts` with `<config dir>/combo-cooldowns.json`, storing absolute expiry epochs (expired or corrupt rows dropped on load, loaded rows get fresh revisions). Writes are debounced, re-read the file under the config mutation lock and overlay only keys this process set, keeping the later expiry; expiry checks, sweeps and the probe lift are memory-only drops, and only `clearComboTargetCooldowns` writes deletes (clearing all is a global reset). A combo-wide clear records its exact null-delimited prefix, removing matching rows from the fresh locked read even when a peer added them after this process loaded. Explicit key and prefix clears exclude old disk rows before dirty values are overlaid, so clearing then re-cooling the same target keeps the new cooldown rather than resurrecting the old hold. Pending clears survive failed writes and are forgotten only after a successful flush. A busy lock retries with bounded backoff and shutdown flushes with bounded attempts. Coverage: `tests/routing/combo-cooldown-persistence.test.ts`.
+
 The opt-in [all-cooled Combo recovery](runtime.md#scoped-provider-quota-for-combo-selection) can reserve saved combo cooldowns in `src/combos/resolve.ts`; only that request bypasses its reserved writes until a successful dispatch conditionally clears its unchanged target, with throwing predicates treated as ineligible during recovery preparation and available siblings preferred without probing cooled targets. Route-level picks and in-flight retry-after-cooldown selections disable reprobes. Recovery does not authorize a fallback hop or bypass the configured fallback policy.
 
 Local combo refusals name target indices and validated provider labels with closed exclusion reasons.
 Configured model strings and combo aliases do not enter the client message; the current contract is
 [Chat client error bodies](data-planes/error-detail.md#client-error-bodies-chat).
+
+A Responses combo advances past a local hosted web-search deadline using a request-scoped
+pick in `src/combos/resolve.ts`. This preserves the primary’s round-robin sticky state
+and leaves target cooldown unchanged. For a committed hosted web-search stream, the combo
+counts a sticky success and clears any matching reprobe cooldown only on successful completion.

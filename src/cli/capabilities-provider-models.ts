@@ -173,14 +173,20 @@ export const PROVIDER_MODEL_CAPABILITIES: readonly Capability[] = [
   },
   {
     command: ["models", "new-policy"], summary: "Read or set the policy for newly discovered models.",
-    usage: "ocx models new-policy [on|off] [--provider <name>] [--json]", routes: [{ method: "GET", path: "/api/model-discovery" }, { method: "PUT", path: "/api/model-discovery" }], mutates: true, json: "payload",
+    usage: "ocx models new-policy [on|off|admit] [--provider <name>] [--json]", routes: [{ method: "GET", path: "/api/model-discovery" }, { method: "PUT", path: "/api/model-discovery" }], mutates: true, json: "payload",
     flags: [{ name: "--provider", value: "string", summary: "Scope the read/write to a provider; omitted means global." }, { name: "--json", value: "boolean", summary: "Emit the policy view or receipt." }],
-    details: ["No state operand means read only. Only on/off writes exist; no inherit/clear operand is implemented."],
+    details: ["No state operand means read only. Writes on, off or admit; admit appends new arrivals to a provider's custom selectedModels and never widens a preset-derived selection. No inherit/clear operand is implemented."],
   },
   {
     command: ["models", "new-arrivals"], summary: "Read recent model discoveries.",
     usage: "ocx models new-arrivals [--json]", routes: [{ method: "GET", path: "/api/model-discovery" }], mutates: false, json: "payload",
     flags: [{ name: "--json", value: "boolean", summary: "Emit recentArrivals grouped by provider." }],
+  },
+  {
+    command: ["models", "discover"], summary: "Re-fetch one provider's live model list now and report new arrivals.",
+    usage: "ocx models discover <provider> [--json]", routes: [{ method: "POST", path: "/api/model-discovery/refresh" }], mutates: true, json: "payload",
+    flags: [{ name: "--json", value: "boolean", summary: "Emit discovery status, newArrivals and recentArrivals." }],
+    details: ["Refreshes one provider's model list. New models follow the configured new-model policy. If discovery is already running for that provider, the route returns HTTP 409 (`discovery_in_progress`). During cooldown it returns the recorded failure. Providers with liveModels off report applicable:false."],
   },
   {
     command: ["models", "context", "status"], summary: "Read routed-provider context caps.",
@@ -247,6 +253,22 @@ export const PROVIDER_MODEL_CAPABILITIES: readonly Capability[] = [
     command: ["alias", "defaults"], summary: "Toggle built-in model aliases globally or for a provider.",
     usage: "ocx alias defaults <on|off> [--provider <name>] [--json]", routes: [{ method: "PUT", path: "/api/default-aliases" }], mutates: true, json: "payload",
     flags: [{ name: "--provider", value: "string", summary: "Limit the toggle to one provider." }, { name: "--json", value: "boolean", summary: "Emit the alias settings receipt." }],
+  },
+  {
+    command: ["alias", "template", "set"], summary: "Set a provider's opt-in alias template for models without an alias.",
+    usage: "ocx alias template set <provider> <template> [--json]", routes: [{ method: "PUT", path: "/api/providers/{provider}/alias-template" }], mutates: true, json: "payload",
+    flags: [{ name: "--json", value: "boolean", summary: "Emit the receipt with the generated and skipped preview." }],
+    details: ["Only the literal {providerAlias} and {modelBasename} placeholders are allowed, and {modelBasename} is required. Aliases are derived when models resolve and never written to config. Manual and built-in aliases win; a generated name that collides with anything already claimed is skipped, never renamed."],
+  },
+  {
+    command: ["alias", "template", "rm"], summary: "Remove a provider's alias template; its generated aliases disappear at once.",
+    usage: "ocx alias template rm <provider> [--json]", routes: [{ method: "PUT", path: "/api/providers/{provider}/alias-template" }], mutates: true, json: "payload",
+    flags: [{ name: "--json", value: "boolean", summary: "Emit the receipt." }],
+  },
+  {
+    command: ["alias", "template", "show"], summary: "Read configured alias templates.",
+    usage: "ocx alias template show [<provider>] [--json]", routes: [{ method: "GET", path: "/api/aliases" }], mutates: false, json: "payload",
+    flags: [{ name: "--json", value: "boolean", summary: "Emit the template map, or one provider's template." }],
   },
   {
     command: ["provider","pacing"],

@@ -7,6 +7,15 @@ import { adoptPersistedModelDiscovery } from "../config/live-reconcile";
 import type { OcxConfig } from "../types";
 import { reconcileSuccessfulModelDiscoveries } from "./new-model-policy";
 
+/** Selections `admit` widened during one reconcile, keyed by provider. */
+function admitSelections(target: OcxConfig, run: () => boolean): Record<string, string[] | undefined> {
+  const before = new Map(Object.entries(target.providers).map(([name, provider]) => [name, provider.selectedModels?.length]));
+  run();
+  return Object.fromEntries(Object.entries(target.providers)
+    .filter(([name, provider]) => provider.selectedModels?.length !== before.get(name))
+    .map(([name, provider]) => [name, provider.selectedModels]));
+}
+
 function inventory(config: OcxConfig): unknown {
   const validated = validateConfigCandidate(config);
   if (!validated.ok) return null;
@@ -25,6 +34,32 @@ export function captureModelDiscoveryBaseline(config: OcxConfig) {
   const disk = readConfigDiagnostics();
   return { identity, persisted: identity !== null && disk.source === "file"
     && isDeepStrictEqual(identity, inventory(disk.config)) };
+}
+
+function projectDiscovery(config: OcxConfig, reconcile: (target: OcxConfig) => boolean, choices = config): OcxConfig {
+  const providers = Object.fromEntries(Object.entries(config.providers).map(([name, provider]) => [name,
+    { ...provider, ...(provider.selectedModels === undefined ? {} : { selectedModels: [...provider.selectedModels] }) }]));
+  const projection = { ...config, providers, modelDiscovery: structuredClone(choices.modelDiscovery),
+    disabledModels: choices.disabledModels === undefined ? undefined : [...choices.disabledModels] };
+  reconcile(projection);
+  return projection;
+}
+
+/** Apply the request's visibility rules to caller-local rows after a newer observation wins. */
+export function projectSupersededModelDiscovery(
+  config: OcxConfig,
+  baseline: ReturnType<typeof captureModelDiscoveryBaseline>,
+  models: Iterable<{ provider: string; id: string; custom?: boolean }>,
+  authoritativeProviders: string[],
+): OcxConfig | null {
+  const filePath = fileBackedConfigPath(config);
+  if ((filePath !== undefined && filePath !== getConfigPath())
+    || !isDeepStrictEqual(baseline.identity, inventory(config))) return null;
+  const disk = baseline.persisted ? readConfigDiagnostics({ passive: true }) : null;
+  if (disk && (disk.source !== "file" || !isDeepStrictEqual(baseline.identity, inventory(disk.config)))) return null;
+  return projectDiscovery(config, target => reconcileSuccessfulModelDiscoveries({
+    config: target, models, authoritativeProviders, now: new Date().toISOString(), mode: "discovery",
+  }), disk?.config);
 }
 
 /** Publish new-arrival choices before returning discovery rows to any visibility consumer. */
@@ -54,11 +89,9 @@ export function finalizeModelDiscovery(
   }
   if (!baseline.persisted && publishProjection) {
     // Drift already existed at admission. Do not add unsaved disables or advance the live
-    // merge baseline: a later rebase-save must preserve the operator's on-disk choices.
-    const projection = { ...config, modelDiscovery: structuredClone(config.modelDiscovery),
-      disabledModels: config.disabledModels === undefined ? undefined : [...config.disabledModels] };
-    reconcile(projection);
-    publishProjection(projection);
+    // merge baseline: a later rebase-save must preserve the operator's on-disk choices. The
+    // provider rows are copied too, so an `admit` widens the projection's selection only.
+    publishProjection(projectDiscovery(config, reconcile));
     return true;
   }
   // A file-loaded instance remains file-backed after inventory drift. The locked
@@ -70,8 +103,9 @@ export function finalizeModelDiscovery(
       }
       // Re-evaluate against the latest baseline and manual choices under the mutation lock.
       // A second caller then adopts a first caller's result rather than disabling an ID twice.
-      const changed = reconcile(fresh);
-      return { changed, value: { modelDiscovery: fresh.modelDiscovery, disabledModels: fresh.disabledModels } };
+      let changed = false;
+      const selectedModels = admitSelections(fresh, () => changed = reconcile(fresh));
+      return { changed, value: { modelDiscovery: fresh.modelDiscovery, disabledModels: fresh.disabledModels, selectedModels } };
     });
     if (result.status === "unavailable" || !result.value) return false;
     adoptPersistedModelDiscovery(config, result.value);

@@ -5,7 +5,7 @@ import { decodeCursorJwtPayload } from "../oauth/cursor";
 import { isTranslatorBudgetExceededError } from "../lib/translator-budget";
 import { cursorExecDeniedMessage, cursorRequestDeclaresFullAccess } from "./cursor/exec-policy";
 import { isCursorBenignCancelError, isCursorIncompleteToolCallMessage, isCursorInvalidArgumentError, isCursorOverflowRemintCandidate, isCursorRootEnvelopeError, safeCursorErrorMessage, type CursorSizeContext } from "./cursor/cursor-errors";
-import { cursorCheckpointModelAffinityId, cursorNeedsExternalToolContinuation, inferCursorContextWindow, isCursorExternalWireModel } from "./cursor/discovery";
+import { cursorCheckpointModelAffinityId, cursorReplaysToolResultInRoot, inferCursorContextWindow, isCursorExternalWireModel } from "./cursor/discovery";
 import { createCursorKvStore, type CursorKvStore } from "./cursor/kv-store";
 import { mapCursorServerMessage } from "./cursor/message-mapper";
 import {
@@ -42,13 +42,14 @@ import {
   markCursorOverflowSurfaced,
   recordCursorIncompleteToolRemint,
   recordCursorEnvelopeEchoRemint,
+  CURSOR_OVERFLOW_REMINT_MAX,
   recordCursorOverflowRemint,
   rememberCursorConversationRewrite,
   rememberCursorThreadConversation,
   shouldSkipCursorOverflowRemint,
   shouldSurfaceCursorOverflowFirst,
 } from "./cursor/thread-continuity";
-import { runCursorTurnWithRetry } from "./cursor/transport-retry";
+import { CURSOR_RETRY_ATTEMPTS, runCursorTurnWithRetry } from "./cursor/transport-retry";
 import { cursorRequestHasShellAlias, cursorRequestUsesCodeMode } from "./cursor/tool-definitions";
 import {
   CURSOR_OUTPUT_GUARD_MAX_HOLD_BYTES,
@@ -131,6 +132,9 @@ function cursorRequestSizeContext(request: {
 export function createCursorAdapter(provider: OcxProviderConfig, deps: CursorAdapterDeps = {}): ProviderAdapter {
   return {
     name: "cursor",
+    // Initial turn, bounded overflow remints, and one terminal corrective retry.
+    hostedIterationSendLimit: (2 + CURSOR_OVERFLOW_REMINT_MAX) * CURSOR_RETRY_ATTEMPTS,
+    reportsPhysicalSends: true,
 
     // Cursor emits Fast as a model variant, so the generic "no field emitted" fallback in
     // adapters/registry.ts would report every Fast turn as downgraded. This recomputes the
@@ -173,6 +177,7 @@ export function createCursorAdapter(provider: OcxProviderConfig, deps: CursorAda
       let requestSizeContext: CursorSizeContext | undefined;
       try {
         const makeTransport = deps.createTransport ?? createLiveCursorTransport;
+        let physicalSends = 0;
         const kv = deps.kv ?? createCursorKvStore({}, incoming.translatorBudget);
         const rekeyContextUsage = deps.rekeyContextUsage ?? rekeyCursorContextUsage;
         // Namespace thread→conversation derivation by the authenticated Cursor credential so
@@ -310,11 +315,12 @@ export function createCursorAdapter(provider: OcxProviderConfig, deps: CursorAda
           const echoSniffer = armEchoSniffer ? new CursorEnvelopeEchoSniffer() : undefined;
           // Mid-stream observer (devlog 260828 F1/F2): diagnostic-only; armed with the
           // prefix sniffer because both fire on flattened tool-result replay priming.
-          // The composer-2.5 builds are native-wire but also replay the tool result as root text
-          // (cursorNeedsExternalToolContinuation), so the client-visible strip and the next-turn
-          // remint follow that predicate. The prefix retry above stays external-only: its
-          // corrective continuation text is encoded for external wire models alone.
-          const armMidstreamEcho = cursorNeedsExternalToolContinuation(activeRequest.modelId) && replaysToolResult;
+          // The composer-2.5 builds and Auto are native-wire but also replay the tool result as root
+          // text (cursorReplaysToolResultInRoot), so the client-visible strip and the next-turn
+          // remint follow that predicate; Auto's #2317 envelope echo is why it is armed there. The
+          // prefix retry above stays external-only: its corrective continuation text is encoded for
+          // external wire models alone.
+          const armMidstreamEcho = cursorReplaysToolResultInRoot(activeRequest.modelId) && replaysToolResult;
           const midstreamObserver = armMidstreamEcho ? new CursorMidstreamEchoObserver() : undefined;
           const midstreamFilter = armMidstreamEcho ? new ToolEnvelopeEchoFilter() : undefined;
           // Claude's factual redirects allow truthful routing prose; it is not a failure claim.
@@ -511,7 +517,8 @@ export function createCursorAdapter(provider: OcxProviderConfig, deps: CursorAda
             // Cursor's retry ladder re-sends the WHOLE turn, so each attempt is a physical send
             // the enclosing request pays for. A meta without a budget -- every adapter unit test,
             // and any caller predating this -- keeps the adapter's own three attempts (#4546).
-            incoming.sendBudget ? { sendBudget: incoming.sendBudget } : {},
+            { sendBudget: incoming.sendBudget, beforePhysicalSend: incoming.beforePhysicalSend,
+              onPhysicalSend: send => incoming.onPhysicalSend?.({ ...send, ordinal: ++physicalSends }) },
           );
         };
 

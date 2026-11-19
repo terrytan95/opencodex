@@ -5,9 +5,10 @@
  * Same translate-and-replay pattern as Claude Messages: the produced body must pass
  * responsesRequestSchema so routing/OAuth/pool/sidecars are inherited unchanged.
  */
+import { normalizedClientExtraContent } from "../responses/provider-opaque-metadata";
 import { chatImageUrlFromPart } from "./image-parts";
 import { signedReasoningInputItems } from "./reasoning-details";
-import { untranslatedChatInputMedia, untranslatedInputMediaMessage } from "../responses/input-media";
+import { chatAudioToResponsesPart, untranslatedChatInputMedia, untranslatedInputMediaMessage } from "../responses/input-media";
 
 export class ChatCompletionsRequestError extends Error {}
 
@@ -34,7 +35,7 @@ export function assertChatCompletionsRoutingBody(raw: unknown): asserts raw is C
 // Pi's "off" thinking level onto it (src/clients/config-export.ts). Dropping it here let a
 // provider default re-enable thinking the caller had explicitly turned off — and for the
 // Anthropic families that think by default, omission is not the same as disabled.
-const OUTPUT_CONFIG_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
+export const OUTPUT_CONFIG_EFFORTS: ReadonlySet<string> = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 const OUTPUT_CONFIG_SUMMARIES = new Set(["auto", "concise", "detailed", "none"]);
 
 export function contentToText(content: unknown): string {
@@ -76,7 +77,7 @@ export function videoFromPart(part: Rec): { url: string; processing?: string } |
   return null;
 }
 
-function userContentToBlocks(content: unknown): Rec[] {
+function userContentToBlocks(content: unknown, allowInlineAudio?: boolean): Rec[] {
   if (typeof content === "string") {
     return content.length > 0 ? [{ type: "input_text", text: content }] : [];
   }
@@ -112,7 +113,8 @@ function userContentToBlocks(content: unknown): Rec[] {
       continue;
     }
     const file = fileFromPart(raw);
-    if (file) blocks.push(file);
+    const attachment = file ?? (allowInlineAudio ? chatAudioToResponsesPart(raw) : undefined);
+    if (attachment) blocks.push(attachment);
   }
   return blocks;
 }
@@ -221,7 +223,9 @@ function toolCallsToItems(
     if (!name) name = knownNameByCallId.get(callId) ?? "";
     if (!name) throw new ChatCompletionsRequestError("tool_calls entries require function.name");
     knownNameByCallId.set(callId, name);
-    input.push({ type: "function_call", call_id: callId, name, arguments: args });
+    // A Gemini thought signature rides on extra_content (the Responses carrier); keep only a
+    // well-formed one so a malformed echo is dropped instead of failing the request.
+    input.push({ type: "function_call", call_id: callId, name, arguments: args, ...(normalizedClientExtraContent(raw.extra_content) ?? {}) });
     awaitingToolResult.add(callId);
   }
 }
@@ -459,13 +463,12 @@ export interface ChatResponsesProjectionOptions {
    * Every other route keeps the plaintext projection.
    */
   acceptAnthropicReasoningSignatures?: boolean;
+  allowInlineAudio?: boolean;
 }
 
 export function chatCompletionsToResponsesBody(raw: unknown, options: ChatResponsesProjectionOptions = {}): Rec {
   assertChatCompletionsRoutingBody(raw);
-  // Only the translated path reaches this function. Native Chat can retain its
-  // provider-specific file/audio blocks; projecting them here would discard them.
-  const unsupportedMedia = untranslatedChatInputMedia(raw);
+  const unsupportedMedia = untranslatedChatInputMedia(raw, options.allowInlineAudio);
   if (unsupportedMedia) {
     throw new ChatCompletionsRequestError(untranslatedInputMediaMessage(unsupportedMedia));
   }
@@ -521,7 +524,7 @@ export function chatCompletionsToResponsesBody(raw: unknown, options: ChatRespon
       }
       case "user": {
         beginConversationTurn();
-        const blocks = userContentToBlocks(msg.content);
+        const blocks = userContentToBlocks(msg.content, options.allowInlineAudio);
         if (blocks.length > 0) input.push({ type: "message", role: "user", content: blocks });
         break;
       }

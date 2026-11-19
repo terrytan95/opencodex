@@ -24,6 +24,14 @@ Mark a pay-per-use combo target with `"metered": true` when it follows subscript
 
 Request headers cannot grant consent. Model/provider scopes still apply. This covers initial selection, failover and recovery across combo strategies, compaction, Messages, Chat Completions and WebSocket requests, and a subagent model fallback naming a combo alias. A collapsed fallback tries a usable unmetered target before refusing. Unmarked targets retain existing behavior; metering is declared by the operator rather than detected automatically.
 
+A request rechecks consent and its key's model scope immediately before each paid send: the JEV
+decision call and every target attempt, including failover, retries and pinned sends. Revoking
+consent or narrowing a key's scope therefore stops sends the request has not made yet. A target that
+no longer qualifies is skipped and another eligible target may serve the request; when none remains,
+the request ends with the usual `combo_unavailable` or scope refusal. Other combo edits, such as
+capabilities, the Vision Sidecar, protocol settings or the target list, apply from the next request.
+A request already in progress keeps the settings it started with.
+
 For example, a failover chain can target Anthropic OAuth, then Cursor, then `{ "provider": "anthropic-apikey", "model": "claude-opus-5-5", "metered": true }`. Without consent, exhaustion returns the last unmetered error, with exceptions for [confirmed context overflow](#context-window-refusals) and quota refusals: an earlier 429 or 402 quota refusal takes precedence over a later 400, 401 or 403. If the subscription target returns 429 and Cursor then refuses with 401 or 403, the caller receives the subscription's 429, because the spent subscription explains the failure and Cursor's credential refusal does not. Dashboard saves retain omitted target metering and combo consent; explicitly setting either to false clears it. These consent fields are configured through the config file or API; the combo flag is also available through the CLI, while the dashboard does not expose it.
 
 ## 60-second quickstart
@@ -172,6 +180,22 @@ Given this order:
 each request starts with Anthropic. A retryable Anthropic failure moves that request to OpenAI; a
 retryable OpenAI failure can move it to Google. A terminal error stops immediately instead of
 trying the remaining targets.
+
+A provider's HTTP 400 response can still be target-specific. OpenRouter's opaque provider wrapper
+(`Provider returned error` with numeric `code: 400`, no `type`, and `metadata.raw: "ERROR"`) is
+treated as target-local and allows the combo to try the next target without cooling the failed one.
+Typed uncoded 400s, known malformed `response_format` schema errors, and an envelope whose root
+states its own terminal code remain terminal; a root that states a hop signal of its own
+(`model_not_found`, `insufficient_quota`, `usage_limit_exceeded`, `free_rate_limited`,
+`input_admission_refused` or `unsupported_input_modality`) adds no new verdict, and an empty
+code is treated as no code. Recognized target incompatibilities described later in this guide
+still advance.
+
+A streamed error event that carries no status of its own but an integral numeric `code` between
+400 and 599 is judged with that code as its HTTP status, so it gets the same decision and cooldown
+as the matching HTTP response. Before output starts, a generic streamed 400, 409, 413 or 422 therefore
+stops the combo as it does over HTTP, a 401, 402 or 403 cools the provider, and a recognized context
+overflow still advances.
 
 ### Round-robin: smooth weighted batches
 
@@ -324,15 +348,42 @@ JEV decides again, and the new decision replaces the pin, when:
 - any send of a pinned session fails (that request still fails over as usual);
 - the configuration has changed since the pin was written.
 
+#### Deciding effort on every pinned turn
+
+A pin keeps the effort of the first decision by default. A session that starts with a planning
+request and continues with small edits then pays for that effort on every turn. Set
+`effort: "per-turn"` to keep the pinned target, and its prompt cache, while JEV chooses the effort
+again on every turn:
+
+```bash
+ocx combo set jev-auto --session-pin 20m --session-pin-effort per-turn --json
+```
+
+```json
+{ "strategy": "jev", "sessionPin": { "ttlMs": 1200000, "effort": "per-turn" } }
+```
+
+When the pinned target offers multiple efforts, a reused turn sends one decision request with
+only that target and its efforts. If JEV picks one of those efforts, the turn uses it and the pin
+keeps it. A failed or unusable decision uses the effort the turn read from the pin. A concurrent
+turn can still update the stored effort. If the pinned target becomes unavailable during the decision,
+the Combo falls back to an eligible target. Usage records retain the effort decision telemetry,
+including tokens the decision model reports when it ends with a failed or incomplete response.
+The turn counts as a regular decision. A single-effort target skips the decision.
+With `jevEffortMode: "client"`, reused turns follow the client effort policy
+and skip the decision. `--session-pin-effort pinned` restores the default. Changing the idle window
+with `--session-pin` keeps the mode.
+
 A cancelled request keeps the pin. A fail-open decision (timeout, missing key, invalid answer)
 never creates one. Pins live in the proxy's memory, at most 512 sessions, and do not survive a
 restart.
 
-Usage records mark a reused turn with `jevDecision.pinned: true` and `pinReason: "session"`. A
+Usage records mark a reused turn with `jevDecision.pinned: true` and `pinReason: "session"`, or
+`pinReason: "session_effort"` when JEV tried to decide its effort. A
 decision that replaced a released pin records why in `pinReason` (`expired`, `config_changed`,
 `target_unavailable`, `effort_unavailable` or `quota_nearly_exhausted`). `ocx combo stats`
-counts pinned requests apart from decisions; they still count toward successful requests, model
-fallbacks and per-model tokens.
+counts every reused turn as pinned. It also counts `session_effort` turns as decisions, including
+failed decisions. Reused turns still count toward successful requests, model fallbacks and per-model tokens.
 
 A pin makes provider cache reuse possible; whether the provider actually serves cached tokens still
 depends on the provider, the account and a stable prompt prefix. `--session-pin -` (API `null`)
@@ -373,8 +424,10 @@ models remain available in their normal picker groups.
 For headless setup, store the key explicitly or reference the TypeSafe environment variable:
 
 ```bash
-ocx provider add jev --api-key "${TYPESAFE_API_KEY}"
+ocx provider add jev --api-key '${TYPESAFE_API_KEY}'
 ```
+
+Keep the single quotes so the shell passes the reference instead of the secret. Set `TYPESAFE_API_KEY` in the proxy's startup environment and restart it if it is already running; a background service needs its own configured environment.
 
 When the provider has no saved key, the decision client also accepts `TYPESAFE_API_KEY` directly and
 the standard provider-derived alias `JEV_API_KEY` printed by `ocx provider add`.
@@ -655,13 +708,32 @@ target/effort, a coarse decision gate, latency, optional confidence/probability,
 Automated tests use mocked TypeSafe responses plus a no-key fail-open smoke; a live TypeSafe decision
 requires an operator-supplied key and is not run implicitly.
 
-JEV's selected effort applies to the first Responses child and to native Chat children on the opt-in
-`protocols.rollout.nativeChatCombos` path. It replaces caller effort and removes conflicting thinking
-controls and caller `service_tier`; an explicit no-effort choice removes effort even when the Combo has
-a forced default. Provider effort pins, caps and wire normalization still apply afterward.
+With `jevEffortMode: "decide"` (the default), JEV's selected effort applies to the first Responses child
+and to native Chat children on the opt-in `protocols.rollout.nativeChatCombos` path. It replaces caller
+effort and removes conflicting thinking controls and caller `service_tier`; an explicit no-effort choice
+removes effort even when the Combo has a forced default. With `"client"`, JEV keeps its selected target
+but leaves effort resolution to ordinary Combo policy: the caller and the target ladder, plus
+`defaultEffort`, so `defaultEffortMode: "force"` still overrides caller effort in client mode. Provider
+effort pins, caps and wire normalization still apply afterward.
 Request and attempt logs show a differing applied effort as `high->xhigh` or `high->low`, retaining later
 adjustments such as `high->xhigh->medium`. An unchanged effort or a no-effort choice keeps the existing
 label. Later fallback targets use ordinary Combo policy from the original request, without another JEV call.
+
+A turn is usually several requests: the model calls a tool, the client runs it, and the next request
+returns the result. Those tool-call continuations stay on the turn's target without another decision
+call, and in `decide` mode they keep the effort JEV chose for the turn while the target still offers
+it; once it does not, ordinary Combo policy applies. In `client` mode they use
+ordinary Combo effort policy like every other request: the caller's effort, unless
+`defaultEffortMode` is `"force"`.
+
+A fallback target, which JEV did not choose, uses ordinary Combo effort policy. A caller effort takes
+precedence unless `defaultEffortMode` is `"force"`. Without one, the Combo's `defaultEffort` applies
+when set, and the provider default applies otherwise. A continuation of a turn that a fallback target
+answered follows the same policy.
+
+In `decide` mode, the Combo's catalog row advertises no reasoning effort levels, so the Codex
+model picker hides its effort control. In `client` mode, the row keeps the shared target ladder
+under ordinary Combo policy.
 
 After the Combo has served requests, open **Models → Combos → jev-auto → Stats** to inspect JEV's
 picks without replacing the normal model picker or Usage page. The tab separates backend-reported decision
@@ -684,9 +756,10 @@ provider, see [Fallback off](/guides/fallback-off/).
 | HTTP 410 with an explicit model end-of-life, retired, deprecated, sunset, decommissioned, or no-longer-available signal | Cool that target and hop. Unrelated 410 responses remain terminal. |
 | Classified authentication, subscription, quota, rate-limit, overload, or upstream-server error | Cool the target and hop, even when the status alone is not sufficient. |
 | Confirmed context-window overflow before output, including HTTP 400 | Try the next untried eligible target without cooling this target; another model may have a larger window. Exhaustion returns the first confirmed HTTP 400 context-length error; a context refusal sent with another status still advances but is not retained. |
+| HTTP 400 or 422 moderation verdict from the provider or a gateway (a structured `moderation_refusal` or `content_filter` code; moderation wording without such a code still stops) | Try the next target without cooling this one; another provider's filter may accept the prompt. A body that also carries a terminal refusal (cyber or bio policy, `invalid_prompt`, `content_policy_violation`, safety-system wording) still stops. |
 | Client cancellation (499), `origin_rejected`, cyber-policy refusal, or other invalid request | Stop and return the error; another target would not make the request valid. |
 | Exact HTTP 400 saying a model is not supported when using Codex with a ChatGPT account | Try the next declared target before output commitment. The message must be the whole refusal in `detail`, `error.message`, or bare text; competing `detail` and `error` envelopes stay terminal. This does not quarantine the account or cool every model on the provider. |
-| Structured HTTP 400 rejecting optional `user`, an unsupported reasoning effort, model-scoped image input, or input media the route cannot read (`unsupported_input_modality`) | Hop before output commitment without cooling; see request-local target compatibility below. |
+| Structured HTTP 400 rejecting optional `user`, an unsupported reasoning effort, model-scoped image input, or input media the route cannot read (`unsupported_input_modality`) | For an effort refusal, try the next lower published rung on the same target while the send budget allows; if no rung works, hop before output commitment without cooling if the refusal matches a recognized compatibility shape, otherwise stay terminal. Other listed mismatches hop without cooling; see request-local target compatibility below. |
 | First tool call of a Responses turn run by an in-process adapter (`runTurn`) that the current request did not declare, before any output or replay-unsafe side effect | Cool the target and hop with the same tool catalog. After visible output or a replay-unsafe side effect the refusal is final. Chat Completions and Anthropic Messages requests are unchanged. |
 | Any other unclassified error | Stop and return the error. |
 
@@ -725,6 +798,25 @@ cooldown.
 For an Anthropic OAuth or Codex pool, a 429 tied to one account that the pool has cooled does
 not cool the whole combo target. Other accounts behind that target remain available. A 429 with
 no identified, cooled pool account still cools the target, as do provider-wide failures.
+
+After a Responses combo stream commits output, an incomplete terminal can cool that target for the
+next request. The reason can appear on the terminal event or its `response` snapshot. A refusal on
+either carrier takes precedence. `upstream_stall_timeout` cools for 60 seconds. `max_output_tokens`
+cools for 10 minutes when the serving attempt reaches the routed model's known output ceiling and
+the turn is unpaused.
+Devin's preset has no output ceiling, so this output-limit cooldown requires an explicit ceiling
+in the provider configuration. An existing longer cooldown keeps its expiry.
+
+During Responses preflight, the combo can try the next eligible target if a replayable terminal
+contains only reasoning or commentary text and arrives within 1 second of the first buffered
+event, including `response.created`. Refusal content or an error on either terminal carrier commits
+the stream to the selected target and preserves the upstream verdict. This also applies when a
+native Responses completion lacks the call required by `tool_choice`.
+A refusal reason such as `content_filter` in `incomplete_details.reason` also commits it, whether
+the reason appears on the terminal event or in its `response` snapshot. Either carrier can also
+veto replay with `end_turn: false` or `incomplete_details.retryable: false`. These replay vetoes also
+apply when a streamed response completes without the call required by `tool_choice`. A final answer, tool
+call, or expiry of the hold also commits the stream.
 
 ### Last-resort targets
 
@@ -779,8 +871,10 @@ every eligible target is cooling; that `combo_unavailable` 503 carries a `Retry-
 to the earliest remaining cooldown, rounded up to whole seconds with a minimum of 1. Waits are not jittered, so
 synchronized wake-ups are possible. An aborted request cancels this wait and returns the normal
 `client_cancelled` response; it does not dispatch a backup target after cancellation. A combo target
-cooldown is process-local per-combo state and is separate from the account-level Codex quota cooldown
-used by native account routing.
+cooldown is per-combo state, separate from the account-level Codex quota cooldown used by native
+account routing. It is saved with its absolute expiry to `combo-cooldowns.json` in the opencodex home,
+so a restart keeps it until that expiry; proxies sharing one home never shorten each other's
+cooldowns. Saving, renaming or deleting the combo clears its cooldowns.
 
 After a confirmed HTTP 400 context refusal, exhaustion returns the first such refusal as
 `context_length_exceeded`, including when the remaining targets cannot replay reasoning or lack
@@ -800,21 +894,45 @@ classify the original HTTP 403 as a hop.
 For streaming requests, the upstream HTTP status is not the final decision. OpenCodex buffers a
 bounded pre-output prefix of the selected child's Responses SSE. If the stream reports a retryable
 `response.failed` terminal before any text, reasoning, tool call, or other output event, the child
-is recorded as failed and the combo may try its next eligible target. A zero-output
-`response.incomplete` follows the same path when its reason is missing or is `adapter_eof`,
-`missing_terminal_event`, or `upstream_stall_timeout`. Explicit semantic reasons such as
-`max_output_tokens` and `content_filter` remain terminal, as does an explicit null reason.
-A reasonless final snapshot that already contains output items is also kept. Once any output event begins,
-the target is committed: a later stream failure is returned to the client and is never replayed on
-another provider, which prevents duplicate text and tool execution. If the pre-output buffer reaches
-its safety cap without a terminal or output boundary, OpenCodex also commits the current target
-instead of growing memory without a bound.
+is recorded as failed and the combo may try its next eligible target. Run-turn combo targets buffer
+their pre-output reasoning for up to one second instead: if a
+zero-output `max_output_tokens` terminal arrives before any visible output and within the hold, the
+turn advances to another eligible target without cooling the healthy candidate; once the reasoning
+hold expires or visible output begins, the target commits and buffered reasoning is streamed
+immediately to the client. A zero-output `response.incomplete` follows the same path when its reason
+is missing or is `adapter_eof`, `missing_terminal_event`, `upstream_stall_timeout`, or an explicit
+`max_output_tokens` limit before any output is emitted. The `max_output_tokens` exception requires
+the turn to look finished: a snapshot that carries `end_turn: false`, or whose
+`incomplete_details.retryable` is `false`, stays on its target. An Anthropic `pause_turn` is a paused
+long-running turn the client is expected to continue; it reaches you as the same `incomplete` with
+reason `max_output_tokens` it always has, and it also stays on its target instead of moving to the
+next one. Other explicit semantic reasons such as `content_filter` remain terminal, as do post-output
+`max_output_tokens` limits and an explicit null reason.
+When every run-turn or SSE target ends with such a zero-output `max_output_tokens` limit, and no
+confirmed context refusal was seen (that one still takes precedence), the client receives the last
+attempt's HTTP 200 `incomplete` response (reason `max_output_tokens`) with that attempt's usage,
+rather than a 502 failure. Non-streaming native JSON is the exception: that body is never inspected,
+so its `incomplete` body, empty or not, is returned to you unchanged. A reasonless final snapshot
+that already contains output items is also kept. The rate-limit and
+response-metadata frames that a native Codex (ChatGPT account) target sends over its WebSocket are
+not output, so an overload error that follows them with no output still moves to the next target.
+Once any output event begins or the reasoning hold deadline is reached, the target is committed: a later stream failure is
+returned to the client and is never replayed on another provider, which prevents duplicate text and tool
+execution. If the pre-output buffer reaches its safety cap without a terminal or output boundary,
+OpenCodex also commits the current target instead of growing memory without a bound.
+
+A streaming HTTP `POST /v1/responses` request (WebSocket excluded) whose target selection takes longer than 15 seconds gets an HTTP 200
+event-stream head and `: keepalive` comments every 15 seconds while the combo keeps choosing, so an
+idle-limited proxy does not close it. From that point a failure of every target arrives as an
+in-stream `response.failed` with the same `error.code` (for example `combo_unavailable`) instead of
+an HTTP error status. Faster selections keep the real HTTP status. See
+[Combo selection keepalive](/reference/configuration/server/#combo-selection-keepalive).
 
 ## Request-local target compatibility
 
 When routing Claude Code to the canonical ChatGPT Codex backend, OpenCodex removes the unsupported top-level `user` metadata field without changing the session/cache key, input messages, tool schemas, or safety identifiers. Public Responses API and noncanonical forward gateways keep that field.
 
-A combo can also advance after an intact HTTP 400 `invalid_request_error` that specifically rejects `user`, reports `unsupported_value` for `reasoning.effort`/`reasoning_effort`, or reports `param: input` with an exact model-scoped `does not support image inputs` rejection. A route that refuses the request's media with code `unsupported_input_modality`, such as image input sent to a CLI provider route without a verified multimodal contract, advances the same way. This is a mismatch for that request, not evidence that the target is unhealthy, so it records no cooldown. This compatibility recovery does not silently change `none` into a different effort or broaden this exception to arbitrary invalid requests. Policy refusals, cancellation and already-committed output remain non-replayable. A single-target request still returns an unresolved upstream rejection.
+A combo can also advance after an intact HTTP 400 `invalid_request_error` that specifically rejects `user`, reports `unsupported_value` for `reasoning.effort`/`reasoning_effort`, or reports `param: input` with an exact model-scoped `does not support image inputs` rejection, and after the exact vendor envelope `{"code":"invalid-argument","error":"Invalid reasoning effort."}`. When a combo target refuses the requested reasoning effort, the combo first retries that target at the next lower published effort rung, one rung per refusal and within the shared send budget; this applies to any recognized effort refusal. If no lower rung succeeds, a refusal in one of the shapes above advances to another target without cooling the rejected one, keeping that target's original 400 when the next rung has no send left; other effort refusals stay terminal. A route that refuses the request's media with code `unsupported_input_modality`, such as image input sent to a CLI provider route without a verified multimodal contract, advances the same way. These are mismatches for this request, not evidence that the target is unhealthy. Direct requests retain their single effort-downgrade repair. Compatibility recovery does not silently change `none` into a different effort or broaden the combo hop to arbitrary invalid requests. Policy refusals, cancellation and already-committed output remain non-replayable. A single-target request still returns an unresolved upstream rejection.
 
 ## Tool calls stay on one target
 
@@ -842,14 +960,14 @@ The target's advertised ladder remains authoritative. An exact supported value i
 
 ### Mixed-capability groups (`reasoningEffortMode`)
 
-The effort levels a combo advertises are the intersection of what its targets advertise. A target
+In `"strict"` mode, a combo advertises the intersection of its known target ladders. A target
 that explicitly advertises **no** effort control takes part in that intersection, so a single
 no-effort backup empties the effort picker for the whole combo — including for the targets that do
 support tuning.
 
-Set `reasoningEffortMode: "adaptive"` to exclude those empty ladders from the published
-intersection instead. The picker then shows the levels the remaining targets share, and the
-no-effort target stays eligible for routing. Targets whose ladder is simply *unknown* are treated
+Set `reasoningEffortMode: "adaptive"` to exclude empty ladders from the published ladder. The
+picker shows the intersection of the remaining ladders with `capabilityPolicy: "intersection"`
+and their union with `"union"`. A target with no effort control stays eligible for routing. Targets whose ladder is simply *unknown* are treated
 as wildcards in both modes.
 
 ```json
@@ -877,10 +995,10 @@ combo's Capabilities section.
 ## Image / multimodal capability
 
 By default a combo publishes the **intersection** of its targets' input modalities (image is
-enabled only when every target advertises it). Set `imageInput: "disabled"` to force text-only
-even when every target supports images — the catalog drops `image` from `inputModalities`, and
-image-bearing requests are rejected with HTTP 400 before any target is called. `"auto"` (or
-omitting the field) keeps the automatic intersection.
+enabled when every target advertises it). A `capabilityPolicy: "union"` combo can advertise image
+input when any target supports it. `imageInput: "auto"` uses the selected capability policy.
+`imageInput: "disabled"` drops `image` from `inputModalities` and rejects image requests with HTTP 400
+before any target is called.
 
 In the dashboard, the **Image / multimodal** switch can be enabled whenever every target has
 known image or text input capabilities. Native image members stay unchanged; text-only members are
@@ -901,6 +1019,64 @@ already covers are skipped, and a save refused before publication restores the c
 Removing a member from the combo does not remove its text-only declaration; clear it in the
 provider editor if you no longer want it.
 
+## Union capabilities (`capabilityPolicy`)
+
+The intersection rule exists because the picker sees one row while the combo used to route without
+looking at the request. Set `capabilityPolicy: "union"` to advertise what **any** target can serve
+and have the combo pick per request instead:
+
+- **Catalog.** `inputModalities` is the union of the targets' modalities, so one text-only backup no
+  longer hides image input. Union catalogs omit video because dispatch cannot verify that the selected wire preserves it. With `reasoningEffortMode: "adaptive"` the effort ladder is the union of
+  the non-empty target ladders, ordered by rank; `"strict"` keeps the intersection, because strict
+  promises every target serves the advertised rung as is. `"intersection"` publishes the smallest
+  target `contextWindow`, and `"union"` also publishes the smallest. Both policies use the minimum input and
+  auto-compaction limits, bounded by the published window and input limit where applicable. Both
+  policies publish the smallest `maxOutputTokens` when every target declares one and omit it otherwise. `imageInput: "disabled"` still
+  removes image.
+- **Images.** For an image-bearing request each target is native (accepts images), degraded
+  (proven text-only, and the [Vision Sidecar](/guides/sidecars/) has a dispatchable plan for the
+  request) or unable (proven text-only without such a plan). Native and degraded targets stay in
+  their configured order, so a degraded subscription target still serves before a later native
+  one; only unable targets are skipped. A target whose image capability is unknown counts as native,
+  the same pass-through the target applies on its own.
+- **Audio.** A target must declare audio input and use a wire that can carry it. Union Chat
+  requests can include inline WAV or MP3 audio. If none of the targets can take the audio, the
+  proxy returns HTTP 400 without dropping it.
+- **Context.** Before picking, the proxy applies the check each combo target's own admission makes
+  ([context-window refusals](#context-window-refusals)): the input estimate, with its 1.1× margin,
+  must fit the target's input limit, and that estimate plus the output reserve must fit its window.
+  A target that fails is skipped, even when its window could hold the input alone. A target with an
+  unknown window remains eligible on context. Compaction turns are exempt from the context check.
+  The proxy evaluates these limits after checking metered consent.
+- **Effort.** Under `"adaptive"`, a caller effort that a target's known ladder lacks maps to
+  that target's highest rung at or below it (`xhigh` on a low/medium/high target is sent as `high`).
+  A request below the entire ladder uses the lowest supported rung.
+- **Order of degradation.** Capability filtering considers only targets that meet metered consent, model scope, mandatory tool selection, and protocol requirements. If a required description fails, the combo skips that send and tries the remaining eligible image-serving targets. It applies `onUnservable` when those choices are exhausted. The proxy logs image omission as a warning and effort adjustments at debug level with the requested and sent rungs.
+- **Nothing can serve.** When no target can hold the input and its output reserve, `onUnservable: "degrade"` (the
+  default) sends it to the target with the largest window, under the same loose admission a direct
+  request gets, and logs a warning. When targets can hold it but every one is unable to take its
+  image, `"degrade"` dispatches anyway: the target replaces each image with an omission note and the
+  proxy logs a warning. `onUnservable: "reject"` answers HTTP 400 when the request cannot fit or the images cannot be served.
+
+```json
+{
+  "combos": {
+    "claude": {
+      "targets": [
+        { "provider": "anthropic", "model": "claude-opus-5-5" },
+        { "provider": "relay", "model": "deepseek-v4.1-flash" }
+      ],
+      "reasoningEffortMode": "adaptive",
+      "capabilityPolicy": "union"
+    }
+  }
+}
+```
+
+The default is `"intersection"`, which keeps the behavior described above. Both fields are stored
+only when they differ from their defaults, and a `PUT /api/combos` that omits them keeps the stored
+values.
+
 ## Encrypted v2 sub-agent tasks
 
 There is one important limitation for Codex v2 sub-agents ([issue #92](https://github.com/lidge-jun/opencodex/issues/92)).
@@ -908,8 +1084,16 @@ A native parent can send a newly spawned worker's task only as ciphertext minted
 ChatGPT backend. An external provider cannot read that payload.
 
 For such a request, a combo filters its eligible targets to canonical native ChatGPT routes,
-including after a retryable failure. If the combo has no decrypt-capable target, opencodex stops
-before dispatch and returns HTTP 400:
+including after a retryable failure. Direct-key Responses routes explicitly trusted with
+`allowEncryptedV2AgentTasks: true` can also receive the encrypted task when selected directly,
+outside a combo; the opt-in does not make them eligible combo targets.
+If no canonical native target is selectable, or native attempts are exhausted, explicitly enabled
+`agentTaskRecovery` may recover an eligible spawned task and continue through an available routed
+combo target. The [encrypted v2 task delivery restrictions](/guides/sub-agent-surface/#encrypted-v2-task-delivery)
+still apply, including loopback-only operation, the incoming native credential and no plaintext
+persistence. If recovery is unavailable or fails and no native attempt has occurred, opencodex
+stops before dispatch and returns HTTP 400; after failed native attempts, their last error is retained.
+The initial unreadable-task response is:
 
 ```json
 {
@@ -961,7 +1145,7 @@ ocx combo remove <id> --yes
 ```
 
 `set` also accepts `--strategy`, `--sticky`, `--effort`, `--alias`, `--native-alias`,
-`--allow-metered-targets on|off`, `--display-name`, `--description`, `--decision-provider`, `--decision-timeout`, and `--rename-from`. Use `-` as the
+`--allow-metered-targets on|off`, `--cooldown-reprobe on|off`, `--cooldown-reprobe-interval`, `--display-name`, `--description`, `--decision-provider`, `--decision-timeout`, and `--rename-from`. Use `-` as the
 value of `--effort`, `--alias`, `--display-name`, `--description`, `--decision-provider`, or `--decision-timeout` to
 clear that field. The two decision flags apply only when the effective strategy is JEV: `--strategy jev`, or a stored JEV combo when `--strategy` is omitted. On an existing combo, `--targets` replaces only
 the target list: without `--strategy` the stored strategy and its JEV settings stay as they are. `--native-alias` requires a currently supported bare native
@@ -1024,8 +1208,11 @@ Combos are stored in the top-level `combos` object, keyed by combo id:
 | `cooldownWaitPolicy` | No | unset | `"before-last-resort"` defers targets marked `lastResort`: they are used only when no normal target is available, for every strategy, and `waitForCooldownMs` only adds the wait for a cooling normal target, so at its `0` default nothing waits and the last resort is used as soon as no normal target is available. Only that exact string opts in. The deferral wait and the ordinary wait share one `waitForCooldownMs` budget per selection attempt. |
 | `defaultEffort` | No | `null` | `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`; resolved against each target's advertised ladder. |
 | `defaultEffortMode` | No | `"fallback"` | `"fallback"` preserves explicit caller effort. `"force"` overrides valid caller effort, requires a valid non-null default, and can increase cost and latency. |
-| `reasoningEffortMode` | No | `"strict"` | `"strict"` intersects every known target ladder, so one target advertising no effort control empties the combo's picker. `"adaptive"` excludes those empty ladders from the published intersection. At dispatch, explicit empty or adaptive unknown ladders remove unsupported effort/thinking controls while preserving supported non-effort reasoning fields such as `reasoning.summary`; known non-empty targets keep existing effort resolution. |
-| `imageInput` | No | `"auto"` | `"auto"` or `"disabled"`. `"auto"` publishes image support only when every target supports images; `"disabled"` forces text-only (drops image from published modalities and rejects image-bearing requests before dispatch). |
+| `reasoningEffortMode` | No | `"strict"` | `"strict"` intersects every known target ladder, so one target advertising no effort control empties the combo's picker. `"adaptive"` publishes the intersection of non-empty ladders under `"intersection"` and their union under `"union"`. At dispatch, explicit empty or adaptive unknown ladders remove unsupported effort/thinking controls while preserving supported non-effort reasoning fields such as `reasoning.summary`; known non-empty targets keep existing effort resolution. |
+| `jevEffortMode` | No | `"decide"` | JEV combos only. `"decide"` applies the decision effort and lets it override the caller. `"client"` keeps the decision target choice but leaves effort to the caller and the target ladder, so a provider that swaps its upstream model id per tier is not re-tiered by JEV. `defaultEffortMode: "force"` still overrides caller effort in client mode. Cache reuse still needs a stable caller effort, target and prompt prefix, and depends on the provider and account. |
+| `capabilityPolicy` | No | `"intersection"` | `"intersection"` advertises shared capabilities and the smallest context window. `"union"` advertises combined capabilities and the smallest context window, and filters targets by request compatibility. Both publish the smallest declared max output only if every target declares one. See [Union capabilities](#union-capabilities-capabilitypolicy). |
+| `onUnservable` | No | `"degrade"` | `"union"` combos only. When no target's window can hold the input, `"degrade"` sends to the largest window with a warning; when no enabled target can take the image, it dispatches and omits the images with a warning. `"reject"` answers HTTP 400 in both cases. |
+| `imageInput` | No | `"auto"` | `"auto"` or `"disabled"`. `"auto"` publishes image support when every target supports it under `"intersection"`, and when any target supports it under `"union"`. `"disabled"` drops image support and rejects image requests before dispatch. |
 | `alias` | No | none | Optional trimmed public model id; use the alias rules above. An empty value is stored as no alias. |
 | `nativeAlias` | No | `false` | Explicitly permit a currently supported bare native `alias` to take routing and catalog precedence. Never inferred from the alias. |
 | `displayName` | No | none | Bounded display-only catalog label. Required and non-empty when `nativeAlias` is true. |
@@ -1048,6 +1235,19 @@ it has already been attempted for this request, or an encrypted v2 task excludes
 provider state and recent upstream errors. When no target was attempted, the error message lists
 why each target was skipped, for example
 `No available targets for combo (2 targets; target 1 (openai): quota exhausted; target 2 (anthropic): cooldown)`. The client error names targets by position and provider only; the service log records the target's position and provider when it fails or when the proxy waits out its cooldown.
+When a cooling target sets the earliest recovery, the response carries it in `Retry-After` and the
+message names the same wait, for example `(retry in ~2m)`, so a client that hides the header still
+shows it. The Claude Messages listener adds the same wait to its fixed combo sentence.
+On `/v1/responses`, the `combo_unavailable` error also carries a machine-readable `combo` object, for
+example `"combo": { "cause": "mixed", "targets": 3, "attempted": 0, "causes": { "quota": 2, "permission": 1 } }`.
+`cause` is one class shared by every skipped target (a target already dispatched is classified only as `unsupported` after refusing a mandatory `tool_choice`), `mixed` when they differ, or `unknown` when none was
+classified. The classes are `quota` (cached quota spent, or a cooldown set by a 429 or 402), `permission` (a
+cooldown set by a 401 or 403), `transient` (any other cooldown), `unsupported` (the target cannot serve this
+request, including a mandatory `tool_choice` no target preserves) and `unavailable` (provider missing or
+disabled). `targets` counts the configured targets, `attempted` the targets dispatched to a child attempt (a child may refuse before any upstream send), and `causes`
+how many targets fell in each class. The object never names the combo, a provider, a model or upstream text.
+Claude Messages also returns HTTP 503 with `combo_unavailable` in its own error shape. Chat Completions
+returns HTTP 503 with type `server_error` and code `server_is_overloaded`.
 For cooldowns, follow an observed `Retry-After` value first;
 Codex reset headers also take precedence over `cooldownMs`.
 If neither upstream signal is usable, the configured `cooldownMs` applies, or the upstream fallback applies
@@ -1066,7 +1266,15 @@ validation message.
 
 ### Context-window refusals
 
-Combo recovery reuses the bounded context-overflow detector used by Responses recovery. It reads the innermost provider message, including `context_length_exceeded`, `prompt is too long`, `input is too long for requested model`, and `Please reduce the length of the messages or completion`. The last three count only when the provider message starts with them (Anthropic's with its token counts), so a validation error that quotes one as a parameter value, or an SDK error string that wraps one, does not qualify. A code beside an unrelated message, malformed JSON, a parameter validation error, or a generic instruction to shorten a parameter does not qualify either. Already-committed output is never replayed. Fallback policy, spend consent and send budgets still apply; each physical attempt retains its own usage. When eligible targets or the send budget run out, the first confirmed HTTP 400 context refusal takes precedence over later retryable errors, including quota errors. A later fatal refusal still stops immediately.
+Before sending to a Responses combo target with a known context window and input limit,
+OpenCodex applies a 1.1× margin to the estimated input tokens and rounds up. The adjusted input
+must fit the input limit, and the adjusted input plus the output reserve must fit the context
+window. The gate can skip a target even when the caller omits `max_output_tokens`. In that case
+it reserves 10% of the target's window, clamped to 1,024–32,768 tokens. A known target output
+ceiling caps the reserve, including when the caller specifies an allowance. For targets with an
+unknown window, OpenCodex falls back to the standard input check (`checkInputAdmission`).
+
+Combo recovery reuses the bounded context-overflow detector used by Responses recovery. It reads the innermost provider message and recognizes explicit context-window/length overflow wording: a history, conversation, input, prompt, request, turn, or messages that have reached or passed a model's context limit; a prompt, input, request, or messages that are too long for the model's context window; a context window/length/limit that is full, exhausted, at its limit, or has been exceeded; and `context_length_exceeded`, `prompt is too long`, `input is too long for requested model`, and `Please reduce the length of the messages or completion`. The last three count only when the provider message starts with them (Anthropic's with its token counts), so a validation error that quotes one as a parameter value, or an SDK error string that wraps one, does not qualify. A negator that governs the overflow wording -- "does not exceed", "has not been exceeded", or "must not exceed" without a token count showing the limit was crossed -- keeps it out, while a negation in an earlier clause does not cancel a later overflow report. Capacity and availability prose about the service ("the context window is full, retry later", "shards exhausted", "KV cache for the context window is exhausted") describes back-pressure, not this turn's size, and keeps its cooldown. That wording is read in the clause that carries the verdict; a remedy that follows it ("Remove older messages before retrying", "enable prompt caching") does not turn an overflow into back-pressure. On a 5xx, "full", "exhausted" and "at its limit" never count as an overflow; they qualify only on a 4xx that speaks about the request. The detector can read the diagnostic from a string-valued JSON `error` field as well as a structured error message; a code beside an unrelated message, malformed JSON, a parameter validation error, or a generic instruction to shorten a parameter does not qualify. Already-committed output is never replayed. Fallback policy, spend consent and send budgets still apply; each physical attempt retains its own usage. When eligible targets or the send budget run out, the first confirmed HTTP 400 context refusal takes precedence over later retryable errors, including quota errors. A later fatal refusal still stops immediately.
 
 ### Why did failover stop after the first error?
 
@@ -1098,8 +1306,9 @@ failover budget; failures record fresh cooldowns. Account quota checks, disabled
 providers, request compatibility, metered-spend permissions and cancellation remain
 enforced. Explicit provider Retry-After values may therefore be retried early only
 when the operator enables this option. Preview/list operations never clear cooldowns.
-The interval is tracked per combo in memory and resets on proxy restart or combo
-selection-state reset. Existing cooldown-wait behavior is unchanged when disabled.
+Each recovery pass's interval reservation is tracked per combo in memory and resets on proxy
+restart or combo selection-state reset; the cooldowns themselves stay persisted. Existing
+cooldown-wait behavior is unchanged when disabled.
 
 A recovery pass belongs only to the request that reserved it; other requests still
 observe the saved cooldowns. That reservation follows the request through cooldown
@@ -1107,3 +1316,11 @@ waits and JEV selection. A target that becomes usable again during a wait can st
 be retried if its cooldown has not changed. A newer cooldown cancels that target's
 reservation. Success clears only the unchanged cooldown of the target that answered;
 untried targets and newer failures keep their cooldowns.
+
+## Suggested combos
+
+When settings change before a suggestion is saved, Combos refreshes the suggestions and displays a message. Saving checks the current exclusions and spend consent.
+
+The proxy enforces these rules on every save. The dashboard can briefly show an action that the proxy then refuses, for example right after settings change in another tab or through the CLI. The proxy answers with HTTP 409, and the workspace reloads the saved settings and combos so the cards match what the proxy allows.
+
+In the Combos workspace, **Generate** opens a failover draft for a model served by multiple providers. **Add to combo** offers missing targets for an existing combo. Dismissed cards stay hidden in this browser. Use **Exclude providers…** to filter both kinds of suggestions. The proxy stores your selection as `comboSuggestionExcludedProviders` in `config.json`. When appending suggestions, the server uses the more costly tier from the active and saved configurations. It treats existing targets explicitly marked as metered as pay-per-use and preserves the relative order of existing targets. Every suggested target can incur paid usage, including subscription channels such as Codex with purchased credits, Grok with Extra Usage, and Kimi Code with Extra Usage. To save a draft, check **Allow paid targets**. To append, first enable paid targets in the existing combo. The proxy saves every suggested target as `metered: true`. The exclusion control stays available after dismissing all cards. Changing an exclusion disables suggestion actions until the dashboard reloads the saved settings, even if the save response is lost. If suggestion settings fail to load, select **Retry**. If saved settings change before you save a suggestion, the workspace refreshes the cards using the current exclusions and paid-target consent. If **Add to combo** is disabled, run `ocx combo update <id> --allow-metered-targets on`, replacing `<id>` with the saved combo ID. The next combo refresh makes the action available when there are eligible targets to add.

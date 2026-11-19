@@ -9,10 +9,16 @@ export interface ProvidersConfig {
     defaultModel?: string;
     models?: string[];
     liveModels?: boolean;
+    transientRetryOn5xx?: { enabled?: boolean; attempts?: number };
     upstreamHttpVersion?: "auto" | "http1.1" | "h1" | "http2" | "h2";
     reasoningWireFormat?: "gateway-object";
     preserveResponsesReasoningContent?: boolean;
     authMode?: string;
+    googleMode?: "ai-studio" | "vertex" | "cloud-code-assist";
+    project?: string;
+    location?: string;
+    vertexCredentialKind?: "ambient" | "marker" | "reference" | "api-key";
+    vertexCredentialVerified?: boolean;
     anthropicOAuthInstance?: "anthropic2";
     keyOptional?: boolean;
     disabled?: boolean;
@@ -29,6 +35,7 @@ export interface OAuthStatus {
   email?: string;
   error?: string;
   done?: boolean;
+  status?: "idle" | "pending" | "complete" | "error";
   hint?: import("../components/login-url-block").LoginHintData;
   needsReauth?: boolean;
   activeAccountId?: string | null;

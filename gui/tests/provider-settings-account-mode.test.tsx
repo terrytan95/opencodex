@@ -59,6 +59,7 @@ function openAiItem(mode: "pool" | "direct" = "pool"): WorkspaceItem {
 async function mountSettings(
   item: WorkspaceItem,
   onUpdateProvider?: (name: string, patch: ProviderUpdatePatch) => Promise<{ ok: boolean; error?: string }>,
+  accountModeFocusToken = 0,
 ): Promise<{
   root: Root;
   container: HTMLElement;
@@ -74,6 +75,7 @@ async function mountSettings(
     <LanguageProvider>
       <ProviderSettings
         item={it}
+        accountModeFocusToken={accountModeFocusToken}
         onUpdateProvider={async (name, patch) => {
           patches.push(patch);
           return onUpdateProvider ? onUpdateProvider(name, patch) : { ok: true };
@@ -115,6 +117,22 @@ async function chooseMode(select: HTMLButtonElement, value: string, answer: "acc
     await Promise.resolve();
   });
 }
+
+test("the ChatGPT settings picker saves the selected number of extra retries", async () => {
+  const { root, container, patches } = await mountSettings(openAiItem("direct"));
+  const select = container.querySelector<HTMLButtonElement>('[aria-label="Same-model retries before output"]')!;
+  expect(select.getAttribute("role")).toBe("combobox");
+  expect(select.textContent).toContain("Default (main retries off)");
+  await chooseOption(select, "5");
+  const saveButton = container.querySelector<HTMLButtonElement>(".pwi-settings-sticky-bar .btn-primary")!;
+  await act(async () => {
+    saveButton.click();
+  });
+  expect(patches).toEqual([{ transientRetryOn5xx: { attempts: 6 } }]);
+  await act(async () => {
+    root.unmount();
+  });
+});
 
 test("a confirmed mode change sends the exact standalone codexAccountMode patch", async () => {
   const { root, container, patches } = await mountSettings(openAiItem("pool"));
@@ -216,5 +234,19 @@ test("a mode-change config refresh does not wipe an unsaved draft", async () => 
   expect(container.querySelector<HTMLTextAreaElement>(".pwi-settings-textarea")!.value).toBe("draft");
   expect(container.querySelector(".pwi-settings-sticky-bar")).toBeTruthy();
   expect(selectValue(modeSelect(container))).toBe("direct");
+  await act(async () => { root.unmount(); });
+});
+
+test("an account-mode deep link focuses the mode control when Settings mounts (#8501)", async () => {
+  const { root, container } = await mountSettings(openAiItem("direct"), undefined, 1);
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(document.activeElement).toBe(modeSelect(container));
+  await act(async () => { root.unmount(); });
+});
+
+test("without a deep link the mode control does not steal focus", async () => {
+  const { root, container } = await mountSettings(openAiItem("direct"));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(document.activeElement).not.toBe(modeSelect(container));
   await act(async () => { root.unmount(); });
 });

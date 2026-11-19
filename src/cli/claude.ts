@@ -9,10 +9,11 @@
  */
 import { resolveSubagentForceModel } from "../claude/subagent-model";
 import { spawn } from "node:child_process";
+import { withClaudeContextSettings } from "./claude-context-settings";
 import { loadConfig } from "../config";
 import { injectClaudeAgentDefs } from "../claude/agents-inject";
 import { CLAUDE_ALIAS_PREFIX_CURRENT, CLAUDE_ALIAS_PREFIX_CURRENT_V2, CLAUDE_ALIAS_PREFIX_V1, CLAUDE_ALIAS_PREFIX_V2 } from "../claude/alias";
-import { claudeTierDisplayName, claudeToolSearchEnv, effectiveModelEnv, isClaudeTierLabelSlot, resolveAutoContext } from "../claude/context-windows";
+import { claudeTierDisplayName, claudeToolSearchEnv, effectiveModelEnv, isClaudeTierLabelSlot, probeClaudeCodeVersionForTierFill, resolveAutoContext } from "../claude/context-windows";
 import { claudeConfigDir, fetchGatewayModels, writeGatewayModelCache } from "../claude/gateway-cache";
 import { commandInvocation } from "../lib/win-exec";
 import { isProxyAdmissionSecret } from "../server/auth-cors";
@@ -20,7 +21,7 @@ import { findLiveProxy } from "../server/proxy-liveness";
 import type { OcxConfig } from "../types";
 import { configuredAdminToken } from "../lib/admin-secrets";
 import { localAdmissionToken, localInferenceDestination, localLoopbackInferencePorts, localManagementOrigin } from "../lib/local-destinations";
-import { PROXY_MARKER, ownAdmissionTokens, defaultAuthDetectDeps, detectClaudeAuth, type AuthDetectDeps } from "../claude/auth-detect";
+import { PROXY_MARKER, ownAdmissionTokens, defaultAuthDetectDeps, detectClaudeAuth, resolveClaudeKeychainPresence, type AuthDetectDeps } from "../claude/auth-detect";
 import { resolveClaudeAuthMode } from "../claude/auth-mode";
 import { withProcessRuntimeProvenance } from "../lib/bun-runtime";
 import { selfLaunchArgv } from "../lib/self-launch-argv";
@@ -37,6 +38,17 @@ import { desktopProfileWireAlias, legacyDesktopProfileWireAlias } from "../claud
 import { inspectDesktopFirstParty } from "../claude/desktop-first-party";
 import { isClaudeInterceptProxyUrl, type ClaudeInterceptSettingsState } from "../claude/intercept/settings";
 import { withoutSiblingMarker } from "../codex/sibling-start";
+import { withoutSupervisorMarkers } from "../lib/supervisor-markers";
+
+/**
+ * The environment of the detached `ocx start` that `ocx claude` launches (the spawn adds the runtime
+ * provenance stamp): an ordinary owner. It carries OCX_SERVICE=1 but no service manager's marker, so a
+ * manager-launched process is told apart from it; a client runtime cannot tell it from a service registered before
+ * the marker existed, and its restart is refused as legacy-flag (src/client/runtime-restart.ts, #8545).
+ */
+export function claudeProxyStartEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return withoutSupervisorMarkers(withoutSiblingMarker({ ...base, OCX_SERVICE: "1" }));
+}
 
 export interface ClaudeLaunchEnv {
   [key: string]: string | undefined;
@@ -52,6 +64,7 @@ export interface ClaudeRoutingTarget {
  * launch base so detection and the spawned process can never disagree (audit R3-3).
  */
 export type ClaudeEnvDeps = {
+  claudeCodeVersion?: string | null;
   forceAvailable?: readonly string[];
   forceAvailableSelectors?: readonly string[];
   authDetect?: Omit<Partial<AuthDetectDeps>, "env" | "ownTokens">;
@@ -377,21 +390,26 @@ export function buildClaudeEnv(
   if (config.claudeCode?.alwaysEnableEffort === true) {
     setDefault("CLAUDE_CODE_ALWAYS_ENABLE_EFFORT", "1");
   }
-  // Tool-search deferral (#4838). Claude Code disables MCP tool deferral whenever
-  // ANTHROPIC_BASE_URL is not a first-party Anthropic host — keyed on the host, not
-  // the model — so every routed session inlines all MCP tool schemas. Its own log
-  // line states the precondition: "Set ENABLE_TOOL_SEARCH=true (or auto / auto:N)
-  // if your proxy forwards tool_reference blocks."
+  // Tool-search deferral (#4838, #7963). Claude Code v2.1.304 and later turn tool
+  // search ON by default behind an ANTHROPIC_BASE_URL gateway, so MCP tools are
+  // deferred and requests carry defer_loading fields and tool_reference blocks.
+  // Earlier versions kept it off behind a gateway unless ENABLE_TOOL_SEARCH was
+  // true / auto / auto:N (code.claude.com/docs/en/mcp#tool-search-through-a-gateway).
   //
-  // We forward them on the native Anthropic passthrough route only. A translated
-  // route cannot honour the shape: deferred tools still carry input_schema on the
-  // wire (deferral is a server-side context optimisation, not a smaller request),
-  // toolsToResponses drops the tool_search server tool and ignores defer_loading,
-  // and compatibility.ts lists tool_search/tool_reference/deferred_tools as
-  // unsupported. Turning it on there leaves the routed provider holding every
-  // schema while Claude Code stops counting them and stops compacting, which is
-  // worse than the problem. So this stays opt-in per config rather than
-  // unconditional, and setDefault keeps an operator's own export.
+  // The native Anthropic passthrough route forwards those fields. A translated
+  // route cannot honour them server-side: deferred tools still carry input_schema
+  // on the wire (deferral is a server-side context optimisation, not a smaller
+  // request), toolsToResponses drops the tool_search server tool and ignores
+  // defer_loading, and compatibility.ts lists tool_search/tool_reference/
+  // deferred_tools as unsupported. On a translated Chat route each client
+  // ToolSearch load also changes the tool list and the catalog nudge, so the next
+  // request re-misses the provider's prompt cache (#7963);
+  // claudeCode.appendOnlyToolLoadingModels covers verified Responses destinations
+  // and claudeCode.chatToolDispatchModels verified direct Chat routes.
+  //
+  // We inject only when claudeCode.toolSearch is set, so an unset value leaves the
+  // client's own version default in place, and setDefault keeps an operator's own
+  // export (ENABLE_TOOL_SEARCH=false restores upfront loading).
   setDefault("ENABLE_TOOL_SEARCH", claudeToolSearchEnv(config.claudeCode?.toolSearch));
   const maxCtx = config.claudeCode?.maxContextTokens;
   if (typeof maxCtx === "number" && Number.isFinite(maxCtx) && maxCtx > 0) {
@@ -417,7 +435,7 @@ export function buildClaudeEnv(
   // Model slots (devlog 260712 B2): default + four tier defaults + legacy small-fast,
   // with automatic [1m] context-variant marking when the slot's target model has an
   // authoritative >=1M window (Claude Code then accounts 1M, compaction preserved).
-  for (const [name, value] of Object.entries(effectiveModelEnv(config.claudeCode, contextWindows, auto))) {
+  for (const [name, value] of Object.entries(effectiveModelEnv(config.claudeCode, contextWindows, auto, deps.claudeCodeVersion))) {
     // A tier slot this launch wrote gets its picker label too (#6926). A slot the user exported
     // stays unlabelled, and a `<slot>_NAME` the user exported wins.
     if (setDefault(name, value) && isClaudeTierLabelSlot(name)) setDefault(`${name}_NAME`, claudeTierDisplayName(value));
@@ -447,7 +465,7 @@ export async function fetchClaudeCodeState(config: OcxConfig, port: number, time
     const headers = new Headers();
     const token = configuredAdminToken();
     if (token) headers.set("x-opencodex-api-key", token);
-    const res = await fetch(`${localManagementOrigin(config, port)}/api/claude-code`, {
+    const res = await fetch(`${localManagementOrigin(config, port)}/api/claude-code?view=launch`, {
       headers,
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -527,7 +545,7 @@ export async function ensureProxyForClaude(deps: ClaudeProxyEnsureDeps = {}): Pr
     stdio: "ignore",
     windowsHide: true,
     // An ordinary owner: a stray sibling marker would otherwise mark it before any probe.
-    env: withProcessRuntimeProvenance(withoutSiblingMarker({ ...process.env, OCX_SERVICE: "1" })),
+    env: withProcessRuntimeProvenance(claudeProxyStartEnv()),
   });
   child.unref();
   const deadline = Date.now() + 8_000;
@@ -858,10 +876,16 @@ export async function cmdClaude(args: string[]): Promise<number> {
     contextWindows = liveState.contextWindows;
     forceAvailable = liveState.forceAvailable ?? [];
   }
-  const gateway = await fetchGatewayModels(route, { admissionConfig: config });
+  const [gateway, claudeCodeVersion, keychainPresence] = await Promise.all([
+    fetchGatewayModels(route, { admissionConfig: config }),
+    probeClaudeCodeVersionForTierFill(config.claudeCode, contextWindows),
+    resolveClaudeKeychainPresence(config.claudeCode?.authMode),
+  ]);
   const forceAvailableSelectors = typeof route === "number" ? undefined : gateway?.models.map(model => model.id) ?? [];
   const allowRootSkipPermissions = shouldAllowRootSkipPermissions(args);
-  const env = buildClaudeEnv(config, route, process.env, contextWindows, { allowRootSkipPermissions, forceAvailable, forceAvailableSelectors });
+  const env = buildClaudeEnv(config, route, process.env, contextWindows, {
+    allowRootSkipPermissions, forceAvailable, forceAvailableSelectors, claudeCodeVersion, authDetect: { keychainProbe: () => keychainPresence },
+  });
   if (allowRootSkipPermissions) {
     console.error(rootSkipPermissionsNotice(env));
   }
@@ -896,7 +920,10 @@ export async function cmdClaude(args: string[]): Promise<number> {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`⚠ Claude agent definitions could not be synced: ${message}`);
   }
-  return spawnClaude(args, env);
+  const launch = withClaudeContextSettings(args, env, config, contextWindows, process.env, {
+    selectors: gateway?.models.map(model => model.id) ?? [],
+  });
+  return spawnClaude(launch.args, launch.env);
 }
 
 async function launchNativeClaude(config: OcxConfig, args: string[], notice: string): Promise<number> {

@@ -3,7 +3,7 @@
 Native Chat/Messages and Claude passthrough use the
 [local timeout contract](../transports/timeouts.md):
 local JSON inactivity is independent of header arrival and total generation; public JSON defaults
-retain their previous allowance. No disabled header clock detaches client cancellation.
+retain their previous allowance. No disabled header clock detaches client cancellation. Gemini `/v1beta` uses the shared dispatcher with an [optional source-preserving Antigravity leg](gemini-native.md).
 
 Thinking enablement is separate from strength: `src/responses/schema.ts` accepts the OCX `reasoning.enabled` boolean and `src/responses/parser.ts` retains it as `options.thinkingEnabled`, independently of `options.reasoning`. Chat `thinking.type` and Anthropic `thinking.type` preserve this choice through their inbound translators; the existing Anthropic disabled-effort sentinel remains for legacy destinations. `src/clients/reasoning-controls.ts` decodes effort-only client aliases for declared toggle-only models before strength caps run. Route fallback restores the original choice alongside effort in `src/server/effort-policy.ts`; a cleared strength list does not clear a thinking switch. Regression coverage lives in `tests/responses/responses-parser.test.ts`, `tests/responses/chat-inbound-reasoning-none.test.ts`, `tests/claude-integration/claude-inbound.test.ts`, and `tests/codex-integration/effort-policy.test.ts`.
 
@@ -63,8 +63,8 @@ unchanged, on both join credentials described under streaming audio. Coverage li
 `src/server/audio-client.ts` recognizes explicit audio keys before local legacy admission.
 Browser sockets offer opencodex-audio and opencodex-key.<base64url-key>; only the public
 marker is selected downstream. Invalid presented keys cannot become credential-free native calls.
-`src/server/audio-dictation.ts` maps the validated desktop session.start/audio.append/session.close
-protocol to ChatGPT dictation with server-owned credentials and a five-minute lifetime.
+`src/server/audio-dictation.ts` validates session.start/audio.append/audio.flush/session.close for ChatGPT dictation with server-owned credentials, a ten-minute recording budget, and a separate bounded 60-second finalization window after close.
+The forwarded TTL does not set the recording budget. ScribeTray's bounded optional metadata and minimal server VAD preserve PCM checks and refusal of audio after close.
 The `src/server/index.ts` byte relay retains bounded queues, handshake/session deadlines and
 the account/turn lifecycle until its upstream closes. `src/server/ws-bridge.ts` carries the
 in-memory callbacks and signal; handshake credentials are cleared after socket construction.
@@ -175,7 +175,7 @@ keepalives. They preserve connection liveness without adding a Chat completion c
 usage, or claiming semantic progress; see the
 [heartbeat contract](../transports/streaming-health.md#heartbeat-and-stall-deadline).
 Chat-to-Responses traffic that lands on `api.meta.ai` inherits the same 64-character tool-name
-aliasing as native Responses; see [`responses.md`](../transports/responses.md).
+aliasing as native Responses; see [`responses.md`](../transports/responses.md). At the final OpenAI-operated Responses serializer only, trusted Chat ingress sets omitted function `strict` to `false` (including legacy `functions`); explicit booleans and parameter schemas survive. The bridge, shared IR, native Responses, hosted tools, Chat destinations, and third-party Responses keep their defaults. Regression: `tests/responses/chat-inbound-tool-strict-defaults.test.ts`.
 
 On that bridge, `src/chat/inbound.ts` decides where a `system` or `developer` message lands by
 where the caller wrote it. A leading block, before any conversational item exists, becomes
@@ -456,12 +456,12 @@ Claude Code enables its message-threads beta only against first-party Anthropic,
 OpenCodex through the first-party intercept. A threaded request carries a `thread` object; a
 `continue` sends only the messages after `previous_message_id` and may leave `system` and `tools`
 to the thread Anthropic stores. `src/server/claude-messages.ts` forwards the request unchanged on
-native passthrough. On the translated path, before compatibility analysis or inference, it
-answers any `thread` object with the 400 from `src/claude/message-threads.ts`, whose
+native passthrough. Weekly reserve steering skips threaded requests. On the translated path, the
+handler answers any `thread` object with the 400 from `src/claude/message-threads.ts`, whose
 `error.details.error_code` is `thread_unsupported_request` and whose request-log error code is
 `claude_thread_unsupported`. A translated `count_tokens` request with a `thread` object gets the
-same 400, because counting the delta would undercount the conversation. Claude Code then resends the turn with the full conversation and keeps
-that model stateless for the session. Translating the delta instead would drop the task,
+same 400, because counting the delta would undercount the conversation. Claude Code then resends
+the full turn and keeps that model stateless for the session. Translating the delta would drop the task,
 instructions and earlier turns without an error.
 
 ## Shared inbound Chat image recognition

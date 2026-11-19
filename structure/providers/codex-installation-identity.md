@@ -47,12 +47,29 @@ metadata-free frames; main and main-pool remain outside this validation.
 `src/adapters/openai-responses/transport.ts` and `src/adapters/openai-responses/passthrough.ts`
 apply the same identity to HTTP headers and a cloned client-metadata map. The serialized body feeds
 `src/server/responses/codex-ws-request.ts`; WebSocket preparation preserves these existence gates.
+The inbound `buildResponsesWsData` contract in `src/server/ws-bridge.ts` keeps the observational usage client separate from the admitted replay principal. `src/server/index/serve-options.ts` passes both; client classification never grants replay authority.
+For an unidentified loopback WebSocket, the upgrade also mints a separate opaque replay scope bound to its own thread. `src/server/index/websocket-handler.ts` retains it only for that socket and releases it before cancelling on close. It grants no credential, history or notes authority; keyed callers retain the durable principal path. The [Responses replay contract](../transports/responses.md) defines its memory-only retention and refusal boundaries.
 `src/server/responses/codex-ws-pool.ts` includes immutable outgoing headers and account in its reuse
 identity. `src/server/ws-bridge.ts` isolates explicit Pool header overrides as well.
+Its inbound handshake snapshot also retains caller-supplied `user-agent` and
+`x-codex-app-version`, so reconstructed turns do not lose the original client identity.
+Provider egress applies its own metadata policy without synthesizing absent caller metadata.
+Bun's HTTP transport can still add its default User-Agent when none is supplied.
+`src/server/responses/core-auth.ts` restores User-Agent and provider-selected metadata after
+credential materialization for Responses turns and compact handoffs. The copier fills only
+missing fields, so a selected Pool installation identity is never replaced with the caller's.
+The same restoration runs on every later physical send of one turn: the 401 refresh replay in
+`refreshPoolForwardAuth`/`refreshNativeMainForwardAuth` and the alternate-account rebuild in
+`src/server/responses/core-codex-account.ts` reapply the permit after their credential
+materialization, so a rebuilt header set cannot silently drop the caller fingerprint or derive
+the wrong account's installation identity. `tests/responses/pool-retry-client-metadata.test.ts`
+pins both physical sends for quota failover and 401 replay.
 Native compact in `src/server/responses/compact.ts` projects the body per physical send, so a quota
 failover uses the newly selected account ID. Alternate construction reports identity failures as
 503 instead of treating them as absence of an eligible account, while recording the first
 account's completed rejection and quota headers without attributing a send to the alternate.
+The first native compact send and a credential replay each enter the
+[usage attempt log](../usage-client-attribution.md#credential-recovery-attempts) at guarded dispatch.
 `src/server/context-history.ts` applies the same clone
 and header contract. `src/server/search.ts`, `src/server/images.ts` and `src/server/live.ts`
 retain the selected context and project cloned client metadata immediately before each physical
@@ -60,6 +77,15 @@ JSON send, including live's converted multipart session. Live inspects JSON cont
 of Content-Type; non-JSON SDP retains its original bytes. Their selected headers authoritatively
 replace or remove mixed-case provider identity defaults; main and main-pool preserve caller values.
 Vision, audio and sidecar credential selection share materialization.
+Dictation in `src/server/audio-dictation.ts` has a 600,000 ms recording budget and
+opts into a separate 60,000 ms finalization window after a validated `session.close`.
+`src/server/index/live-sideband.ts` replaces the recording timer on that event;
+expiry and cancellation retain the existing authenticated transport cleanup and lease ownership.
+Recording and finalization budget expiry is neutral for account health; an upstream connection timeout remains a timeout.
+The forwarded session TTL does not shorten the recording budget; other audio transports do not opt in.
+Dictation validation also accepts ScribeTray's bounded identifiers, stop-request capability,
+language, asset mode `none`, minimal server VAD, and nonterminal `audio.flush`.
+Optional VAD values retain their numeric bounds; start/close ordering and PCM checks remain enforced.
 `src/server/audio-live.ts` projects the authenticated call's cloned session before JSON or
 multipart serialization and returns a sanitized 503 without sending on identity failure.
 Its socket resolver and `src/server/audio-dictation.ts` carry the selected auth context through

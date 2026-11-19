@@ -5,6 +5,10 @@ description: 提供者条目、身份验证、端点、模型目录、配额、�
 
 提供者用于告诉 opencodex 模型位于哪里、使用哪种线协议适配器，以及请求如何进行身份验证。
 
+## Mistral 每次请求的图片数量
+
+Mistral 图片数量限制及 `mistralMaxImages` 设置见[英文规范参考](/reference/configuration/providers/#mistral-images-per-request)。对于到达限制器的 `image_url` 项，缺失、为空或非字符串的图片引用会在出站副本中替换为文本，且不占用图片限额。对于经过转换的 Responses 请求，解析器会丢弃既没有可用 URL 也没有文件 ID 的 `input_image`。在消息或工具输出块中，若存在非空 `file_id` 而没有非空 `image_url`，媒体防护会在发送到 Mistral 前拒绝请求；在防护不检查的重放 `agent_message` 内，解析器会改为输出 `[image: <file id>]` 文本标记，作为普通文本发送且不占用图片限额。限制器仅统计 `image_url` 或 `image_url.url` 中的非空字符串，不验证 URL 语法或可访问性。其他目标的行为保持不变。
+
 ## 自定义渠道的上下文窗口
 
 自定义渠道未报告或配置模型窗口时，OpenCodex 依次使用 Azure 元数据、按模型 ID 查询的内置厂商/聚合元数据、已启用的 Context cap，最后回退到 128k。已有发现值与配置值取较小者，Context cap 仍会向下限制窗口，内置渠道行为不变。精确 ID 优先，大小写或点号/短横线变体仅在无冲突时匹配；未知或浮动别名不猜测。推断会影响 Codex 压缩预算和其他客户端目录（含 Claude 长上下文选择），但不作为中转实测能力供路由使用。同名模型不保证中转支持官方窗口；请用 modelContextWindows 或 Context cap 设置中转实际上限。不会自动开启 cap，也不会调用模型探测。OpenAI API 窗口不代表 Codex 订阅窗口。
@@ -62,6 +66,8 @@ ocx models provider openrouter on
 | `codexFailureWindow?` | `boolean` | `true` | 60 秒滑动失败率，与连续计数一起使用。至少 20 次且失败率 ≥25% 时账号降级，新线程避开它；比率 ≤10% 并持续 30 秒后恢复。已绑定线程不切换。`false` 只使用连续计数。 |
 | `codexPinnedTransientPolicy?` | `"hold" \| "detour-new-threads"` | `"hold"` | 手动固定的账号降级时，`hold` 继续使用并记录警告；`detour-new-threads` 只把新线程放到其他账号。不会改派进行中的请求，也不会在已发送后重发。 |
 | `codexWsReuseAcrossTurns?` | `boolean` | `false` | 可选：同一账号和线程的 Codex WebSocket 跨回合复用。开启后忙套接字最多等待 750ms，模型或服务层级变化时最多保留 2 个套接字，回合状态头只出现在每条消息上。 |
+| `codexWsIncrementalUpload?` | `boolean` | `false` | 实验性原生 ChatGPT Codex 增量上传，为已通过 API 密钥识别身份的调用者开启跨回合连接复用。无密钥的本地回环请求使用一次性连接并发送完整 create。每个命名提供方路由都有独立的连接复用范围。响应确认完成且历史前缀完全匹配时，只发送新增内容和 `previous_response_id`。客户端仍可用 HTTP/SSE，`websockets` 只控制入站升级。历史、设置、账号、出口改变或连接失效时重新发送完整上下文；不确定执行不自动重放。若后端在任何响应活动之前明确拒绝代理生成的续接 ID（缓存未命中），代理在相同调用者、节流和派发校验下仅重发一次保留的完整请求；客户端提供的 ID 不触发此恢复。空闲连接最多保留 10 分钟，总寿命最多 50 分钟；32 条连接和每条连接 32 次交换上限不变。若该次重发被请求发送预算、工作流发送上限或支出限额拒绝，客户端收到的就是原始 `previous_response_not_found`，下一次完整历史请求按完整 create 发送。开启后，显式出口为 HTTP 代理的提供方会经该代理走 Codex WebSocket，而不是降级为 HTTP/SSE。通过 `ocx config set` 保存的更改会在运行中的代理采用新配置或重启后生效。`/api/sync` 读取独立的配置快照以同步客户端。 |
+| `upstreamHistorySlim?` | `"off" \| "codex"` | `"off"` | 可选的**有损**原生 Codex 历史瘦身：最新用户消息之前，大于 1 KiB 的内联图片替换为文本占位；超过 32 KiB 的工具文本仅保留头部 2 KiB 和尾部 1 KiB。当前回合、本地历史、远程图片 URL 和文件引用保留。它并不保证每张图严格只上传一次，完整重放时模型无法查看已省略旧图的细节；需要保留旧图时保持 `off`。HTTP/SSE 创建请求可单独应用此设置。`/responses/compact` 会收到完整上下文。通过 `ocx config set` 保存的更改会在代理采用新配置或重启后生效。普通上游 WebSocket create 只有同时设置 `codexWsIncrementalUpload: true` 时才会瘦身。 |
 | `upstreamHostCircuitThreshold?` | `number` | `0` | 原生 OpenAI forward Responses 与 compact 发送的可选断路器阈值，仅统计已证明的连接前 DNS/TCP 故障。`0` 表示禁用；`1`–`20` 表示在这么多个终止逻辑请求失败后，对 provider-origin 冷却 30 秒。断路期间会在账户选择和上游发送之前返回带 `Retry-After` 的 `503`；冷却结束后只允许一个半开请求。超时和 HTTP 响应不计数，任意 HTTP 响应都会关闭断路器。 仅适用于未固定账户的 Codex Pool 路由；在 `codexAccountMode: "direct"` 或使用账户限定选择器时不会启用。 |
 | `maxInboundBodyBytes?` | `number` | `0` | 单个入站 JSON 请求体解码后大小的字节上限。省略或设为 `0` 会保留 256 MiB 默认值；配置值限制在 1 至 512 MiB。修改后需要重启。超限会返回本地 HTTP 413，错误代码为 `inbound_body_too_large`。生效上限大于 256 MiB 时，还会启用 `maxConcurrentInboundBodyBytes` 共享门槛；仅提高单请求上限不会提高共享预算。受约束的路径与详情见[入站请求体准入](/zh-cn/reference/inbound-body-admission/)。 |
 | `maxConcurrentInboundBodyBytes?` | `number` | `536870912` (512 MiB) | 可选的顶层共享准入预算，单位为字节，仅在生效的 `maxInboundBodyBytes` 大于 256 MiB 时启用。省略、`0` 或无效值均使用不变的 512 MiB 默认值。有效的正整数在使用时限制在 512 MiB 至 2 GiB（`536870912` 至 `2147483648`）范围内。修改后需要重启；同一进程内的所有监听器共享一个预算。这是准入计量，并非预先分配的内存、RSS 上限或按 RAM 自动调整的容量。2 GiB 必须由运营者明确选择。配置示例、队列及响应生命周期的取舍，以及默认预算为何在解析前只允许一个完整 512 MiB 上传，见[入站请求体准入](/zh-cn/reference/inbound-body-admission/)。 |
@@ -101,10 +107,13 @@ selector，而不是分配一个新名称。
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
 | `adapter` | `string` | `openai-chat`、`openai-responses`、`anthropic`、`google`、`kiro`、`cursor`、`ollama-native`、`azure-openai`（或别名 `azure`）之一。 |
+| `cacheAffinity?` | `"auto" \| "session" \| "turn" \| "off"` | 优先使用处理上一次成功轮次的密钥，适用于至少有两个条目的密钥池，不包括 OAuth/forward。默认值为 `auto`。本地拒绝保留绑定；上游拒绝仅释放与实际提供服务的供应商和条目匹配的绑定。参阅[完整英文约定](/reference/configuration/providers/#provider-entries-ocxproviderconfig)。 |
 | `baseUrl` | `string` | 上游 API 基础 URL。大多数内置固定端点会忽略不匹配的值；具备冲突安全键的预设会保留一个更早、同名的自定义目标。 |
 | `requestPacing?` | `{ enabled, requestsPerMinute?, minIntervalMs?, maxConcurrentRequests?, models?, keySelection?, keys? }` | 可选的客户端出站请求启动节流，与上游用量、计费和限流指标相互独立。`maxConcurrentRequests` 是限制进行中请求数的正整数，提供商或模型规则都可以只配置此项。提供商限制适用于所有模型，`models` 按上游模型精确 ID 匹配，并可增加延迟或收紧并发限制。排队等待不计入响应头超时。覆盖 HTTP 以及显式适配器 `fetchResponse`/`runTurn` 调用。配置并发上限时，标准 Responses WebSocket 请求改用 HTTP/SSE，以便在响应体完成、出错或取消时释放并发名额。 对包括 Cursor 在内的 `runTurn` 适配器，并发上限计算进行中的回合数，而非物理发送数：同一回合内的 RunSSE 和 BidiAppend 可以重叠，其他回合仍须等待。后续发送仍遵守启动间隔。 |
 | `requestPacing.keySelection?` | `"active"`, `"round-robin"` | 正常请求的密钥选择：默认 `active` 保留已保存密钥和现有错误切换；`round-robin` 按顺序分配可用池密钥，不修改已保存的选择。均衡的是分配次数，不是令牌或费用。 |
 | `requestPacing.keys?` | `{ requestsPerMinute?, minIntervalMs?, maxConcurrentRequests? }` | 按密钥引用设置统一 RPM、最小启动间隔和并发上限，跨模型共享，并同时受提供商和模型上限约束。相同引用共享容量；同一上游项目的不同引用不代表独立配额。不管理 TPM 或每日配额。 |
+| `connectTimeoutMs?` | `number` | 此提供方等待响应头的时限，单位为毫秒。接受 0 到 2147483647 的整数。在支持的路径上，`0` 会关闭此计时器。未设置时继承全局值。通过 `PATCH /api/providers?name=<provider>` 发送 `null` 可清除此覆盖值。 |
+| `stallTimeoutSec?` | `number` | 供应商级空闲时限，单位为秒。对于经适配器路由的流式响应，计时器测量相邻两个已解析的上游事件之间的时间。请将此值设为大于预期的最长事件间隔。接受 0 到 2147483 的整数。在支持的路径上，`0` 会关闭此计时器。未设置时继承全局值。在同一个 PATCH 接口中发送 `null` 可清除此覆盖值。 Responses 直通请求使用全局超时设置。 |
 | `responsesPath?` | `string` | 用于 key-auth `openai-responses` 请求的相对资源路径。必须以 `/` 开头，且不能包含 scheme、query 或 fragment。 |
 | `chatCompletionsPath?` | `string` | 用于 `openai-chat` 请求的相对资源路径，是 `responsesPath` 的对应项，适用相同的路径规则。当同一上游以不同前缀提供 Chat Completions 和 Responses 时需要此配置：按模型的 wire override 只更换适配器而不改动 `baseUrl`，否则已启用的 Chat 请求会被发送到 Responses base。随附示例为 Z.AI。 |
 | `projectResponsesLiteHostedSearchHistory?` | `boolean` | 默认关闭。仅实际布尔值 `true` 可为此 provider 显式启用有损 hosted-search 历史投影，且只作用于最终目的地精确为标准 ChatGPT Codex `/responses`、明确选择 Responses Lite 的普通请求及原生 v2 `compaction_trigger` 压缩请求。省略或设为 `false` 时保留结构化历史；字符串和数字无效。不会启用 Lite、改变传输，也不影响原生 v1 `/responses/compact`、公开 OpenAI API／其他目的地或既有 portable/routed compaction 投影。详见[Lite 搜索历史](/zh-cn/reference/proxy-formats/#codex-原生普通-lite-请求的搜索历史)。 |
@@ -119,6 +128,7 @@ selector，而不是分配一个新名称。
 | `defaultModel?` | `string` | 当选择该提供者但未显式指定模型时使用的模型。 |
 | `models?` | `string[]` | 初始/回退模型列表。`liveModels: false` 时，非空 `models` 后接 `retainModels`；若 `models` 为空或省略，则按已配置的 `defaultModel`、`retainModels` 顺序构建初始列表，重复 ID 仅保留首次出现的位置。 |
 | `liveModels?` | `boolean` | 启动/同步时获取实时目录（默认 `true`）。自定义提供者使用 `${baseUrl}/models`；内置项可能使用注册表 URL 并进行过滤。 |
+| `modelDiscovery?` | `{ skipInvalidRows?: boolean }` | 针对 `/models` 列表含有格式错误行的网关的实时发现兼容设置。默认情况下只要有一行无效就拒绝整个列表，警告会给出第一个无效行和无效行数量。设置 `skipInvalidRows: true` 时，非对象行以及 id 缺失、非字符串、为空或其他无效的行会被跳过，并只发出一次警告报告跳过的数量，不包含行内容。响应大小和行数上限仍计算收到的全部行；去重、提供方过滤和 id 前缀剥离作用于剩余的行。如果跳过了行且没有剩余行，列表仍被拒绝，不会被当作空目录。同一目标的保存省略该字段时会保留，迁移到其他目标时会丢弃。与顶层 `modelDiscovery`（新模型策略状态）无关。 |
 | `selectedModels?` | `string[]` | 发现之后的目录允许列表。非空时只暴露这些 id；为空或省略时则暴露全部发现到的模型。 |
 | `modelDisplayNames?` | `Record<string, string>` | 持久的仅显示名称，以此提供者的精确原生模型 id 为键。键区分大小写。名称优先于提供者目录元数据，并且不会改变身份验证、适配器、路由、计费或上游请求。例外：当直接的 `provider/model` 选择器不匹配任何已知 id、别名或 `retainModels`（例如实时目录尚未获取时），编码形式相同的键会作为原生 id 发送。该映射最多可包含 2,000 个条目，与发现上限相同。 |
 | `contextWindow?` | `number` | 上游缺少元数据时使用的提供者级上下文数值；有元数据时作为上限，保留更小的实时数值。Models 面板中与 `providerContextCaps` 分开设置。 |
@@ -162,8 +172,8 @@ selector，而不是分配一个新名称。
 | `responsesSnapshotRepair?` | `boolean` | 默认关闭的客户端修复，用于补全 SSE 与 JSON 中稀疏 Responses 生命周期快照缺失的 status、output 和工具元数据；原始检查与持久化保持不变。 |
 | `promptCacheKey?` | `boolean` | 为整个 `openai-chat` 提供商启用 `prompt_cache_key` 转发。适配器只转发收到的密钥，不自行生成，但 Claude Messages 转换会从 `metadata.user_id`，或在没有元数据时从模型/系统/工具组合派生密钥。除非预设声明，否则默认关闭；Mistral 按其[提示缓存契约](https://docs.mistral.ai/studio/conversations/advanced/prompt-caching)启用，显式 `false` 可关闭。仅在上游明确支持时启用，严格网关可能以 HTTP 400 拒绝未知字段。 |
 | `retryOn429?` | `{ enabled?: boolean; attempts?: number; intervalMs?: number; maxIntervalMs?: number; respectRetryAfter?: boolean }` | 仅限 API-key 提供商（`authMode: "key"`）。未配置时关闭，但规范端点的 OpenCode Go 和 Command Code，以及规范 Mistral 的 `openai-chat` 例外：默认重放 6 次、间隔 10 秒、上限 60 秒。配置对象即启用；`enabled: false` 也会关闭该默认策略。流开始前的 HTTP 429 按 `Retry-After` 或固定间隔等待，然后在密钥故障转移之前用同一密钥重放同一请求。覆盖文本轮次恢复、Responses passthrough、图像/视频桥、web-search 侧车和终结续接；自定义 `runTurn` 不在范围内。`attempts` 统计首个 429 后的同密钥重放次数（总发送次数 = `attempts` + 1），预算由整个请求共享。耗尽时仅停止同密钥重放，随后按可用目标执行正常密钥故障转移或最终错误处理；密钥认证 passthrough 无故障转移，会原样返回 429。规范 Mistral Chat 的显式上游延迟超过允许等待时间时，会停止同密钥重放并保留原始 `Retry-After`；池中另一密钥仍可能处理请求。其他提供商仍将等待截断至上限。Mistral 按凭据/模型共享重试截止时间；`requestPacing.enabled: false` 或 `retryOn429.respectRetryAfter: false` 可关闭。无重试时间的 429 在确认每分钟预算不足时触发保守的 60 秒恢复等待，随后仅探测一次，成功即恢复正常流量。正常流量不预测下一次 token 成本。策略使用公布的额度，排除已知耗尽的月度额度，不承诺精确重置时间，也不触发历史压缩。Codex 本身不会重试 429。对象默认值：`enabled: true`、`attempts: 3`、`intervalMs: 5000`、`maxIntervalMs: 60000`（单次等待上限，配置最大 600000）、`respectRetryAfter: true`。 |
-| `transientRetryOn5xx?` | `{ enabled?: boolean; attempts?: number }` | 仅限使用 key 认证的 `openai-chat` 与 `openai-responses` 提供商。`authMode: "forward"` 的提供商（ChatGPT 账号池）从不读取此选项，保持默认重试次数。可选的流开始前上游瞬态状态码（500、502、503、504、520、521、522）重试：未配置时关闭；对象存在即启用，除非 `enabled: false`。覆盖初始 Responses 请求、终结守卫续接、原生 `/v1/chat/completions`，以及 429/账户恢复重新获取。`attempts` 是单个请求允许向上游发送的总次数，包含首次发送（1..10，默认 3）；它是与连接重置恢复共享的按请求预算，因此 `3` 表示最多只有三个实际请求到达提供商。等待采用固定 400 毫秒的指数退避，上限为 5 秒，并遵循 `Retry-After`。此选项独立于处理速率限制的 `retryOn429`；流开始后的故障绝不会重放。 每个 Combo 目标都把预先预约的首次发送计入该目标配置的总次数；`attempts: 1` 只发送一次，不会退还预约来增加额度，也不会提高共享上限。发送前的本地拒绝或取消会释放未使用的预约。 |
-| `retryOnReset?` | `{ enabled?: boolean; replacements?: number }` | 适用于原生 `openai-responses` 提供商（包含 `authMode: "forward"`），以及收到上游响应头之前的通用 Responses 转换发送路径。可选地替换一次在调用方尚未观察到任何内容时就失败的发送：未配置时关闭；对象存在即启用，除非 `enabled: false`。涵盖两个不确定阶段——响应头到达前连接断开，以及响应头之后 SSE 正文只承载控制事件时断开。canonical ChatGPT 上游 WebSocket 在 create 帧发出之后、任何 Responses 事件到达之前关闭或出错时，也按同样方式处理，其替换发送走 HTTP。只有自包含的请求才会被替换：`store: false`、完整的 `input`、没有 `previous_response_id`／`conversation`／`stream_id`，且只使用由客户端执行的工具。`replacements` 是单个逻辑请求在所有环节和所有组合子请求中可以进行的替换发送次数（1..2，默认 1）；它既不是按环节的重试次数，也不是发送预算，因此替换发送仍必须落在该环节已有的发送额度之内。已经产生输出或工具调用的请求，无论此值为何都不会被替换。如果上游已经开始了第一次推理，被替换的推理仍可能计费，因此该选项默认关闭。 通用转换发送路径的首次发送和重建后的发送都支持响应头之前连接重置后的替换，使用同一授权和发送预算。适配器自行管理的传输，以及收到上游响应头之后的转换流故障，均不在此选项范围内。 |
+| `transientRetryOn5xx?` | `{ enabled?: boolean; attempts?: number }` | 在流开始前遇到上游瞬态状态码（500、502、503、504、520、521、522）时重试。对于使用密钥认证的 `openai-chat` 和 `openai-responses`，省略配置时关闭，空对象启用默认的三次发送。标准 ChatGPT 转发必须显式设置 `attempts` 才会启用。两种认证方式均可通过 `enabled: false` 关闭此设置。在提供商 → OpenAI → 设置中，可选择首次发送后的重试次数（0 至 9 次）。没有生效的设置时，ChatGPT 主账号只发送一次，直接传递输出前收到的 WebSocket 容量拒绝，无需暂缓流。Pool 和原生压缩沿用现有恢复行为。`attempts` 是上游发送总次数（1 至 10），包含首次发送、连接重置恢复和 Pool 恢复，也适用于原生 `/responses/compact`。独立 ChatGPT 请求可在请求、工作流和支出上限内使用配置的次数。重试采用基准为 400 毫秒、上限为 5 秒的指数退避，并遵循 `Retry-After`。速率限制等待由 `retryOn429` 处理。已提交的流不能重放。 每个 Combo 目标都把预先预约的首次发送计入该目标配置的总次数；`attempts: 1` 只发送一次，不会退还预约来增加额度，也不会提高共享上限。发送前的本地拒绝或取消会释放未使用的预约。 |
+| `retryOnReset?` | `{ enabled?: boolean; replacements?: number }` | 适用于原生 `openai-responses` 提供商（包含 `authMode: "forward"`），以及收到上游响应头之前的通用 Responses 转换发送路径。可选地替换一次在调用方尚未观察到任何内容时就失败的发送：未配置时关闭；对象存在即启用，除非 `enabled: false`。涵盖两个不确定阶段——响应头到达前连接断开，以及响应头之后 SSE 正文只承载控制事件时断开。canonical ChatGPT 上游 WebSocket 在 create 帧发出之后、任何 Responses 事件到达之前关闭或出错时，也按同样方式处理，其替换发送走 HTTP。只有自包含的请求才会被替换：`store: false`、完整的 `input`、没有 `previous_response_id`／`conversation`／`stream_id`，且只使用由客户端执行的工具。若链式轮次的 `previous_response_id` 已由本代理根据自身重放状态展开，该 ID 会在发送前移除，因此该轮次同样符合条件。重置未被替换时，服务日志会记录原因：`ambiguous-no-policy`、`ambiguous-request-not-replayable` 或 `ambiguous-allowance-spent`。`replacements` 是单个逻辑请求在所有环节和所有组合子请求中可以进行的替换发送次数（1..2，默认 1）；它既不是按环节的重试次数，也不是发送预算，因此替换发送仍必须落在该环节已有的发送额度之内。已经产生输出或工具调用的请求，无论此值为何都不会被替换。如果上游已经开始了第一次推理，被替换的推理仍可能计费，因此该选项默认关闭。 通用转换发送路径的首次发送和重建后的发送都支持响应头之前连接重置后的替换，使用同一授权和发送预算。适配器自行管理的传输，以及收到上游响应头之后的转换流故障，均不在此选项范围内。 |
 | `autoToolChoiceOnlyModels?` | `string[]` | `tool_choice` 只接受 `auto` 或 `none` 的模型；强制选择会被降级。 |
 | `preserveReasoningContentModels?` | `string[]` | 需要在聊天历史中保留先前 assistant `reasoning_content` 的模型。从仪表板保存时会保留已存储的列表（包括 `[]`）。`PATCH /api/providers?name=<provider>` 接受数组，或传入 `null` 清除该字段。将提供方改到其他适配器、base URL 或认证模式的保存不会保留该列表（见下文）。 |
 | `reasoningDetailsModels?` | `string[]` | 以结构化 `reasoning_details` 数组返回思考内容的模型（启用 `reasoning_split` 的 MiniMax M 系列）；流式增量为累积快照，按前缀差分处理，保留的推理以 `reasoning_details` 数组而非 `reasoning_content` 字符串回放。 |
@@ -182,6 +192,8 @@ selector，而不是分配一个新名称。
 | `unsafeAllowNativeLocalExec?` | `boolean` | Cursor 旧布尔值；仅当更新字段未设置时，等同于 `nativeLocalExec: "on"`。 |
 | `nativeLocalExec?` | `"off" \| "codex-sandbox" \| "on"` | Cursor 本地执行策略。`off` 是默认值；`codex-sandbox` 目前会像 `off` 一样失败关闭。 |
 
+对于原生 Responses，同一开关也涵盖仅收到生命周期事件后正常结束的 EOF。自包含请求和替换次数限制仍然适用。超出这些限制的请求不会被检查，其流也不会被暂扣。直接流即使上游仍无响应，也会在 200 毫秒内收到原始响应头。只有在返回该响应头之前选定替换响应时，替换响应才会带有其自身的状态和响应头：直接流的重置或 EOF 必须发生在这 200 毫秒内，且替换响应头必须在原始响应到达后 15 秒内（若停滞超时更短则以其为准）到达。汇总为 JSON 的非流式请求和组合目标没有 200 毫秒窗口，在响应汇总或选定之前不会向客户端返回响应头，因此选择响应头前可能等待同样的时间。返回响应头之后，是否替换取决于流如何结束：读取错误保留重置通道的既有行为，替换正文照旧发布在原始响应头之后；只有生命周期事件后正常结束的 EOF 更严格，因为它是以另一次尝试回答同一轮请求，替换响应必须与已提交的响应头在状态、状态文本、content-type 媒体类型、`openai-model` 和 `x-codex-turn-state` 上一致。易变和逐跳标头（`date`、请求 id、`cf-ray`、`server-timing`、`x-ratelimit-*`、`openai-processing-ms`、`content-length`、`transfer-encoding`、`connection`、`keep-alive`）无需一致，因为客户端已经持有原始响应头的值，而真实上游每次尝试都会变动这些标头。不一致时保留原始流及其错误。此后仍在检查的直接流会随响应头收到一条 SSE keepalive 注释，此后每 15 秒再收到一条；组合预检会在选定响应前暂扣这些注释。
+
 LM Studio instruction compatibility: `singleLeadingSystemMessage: true` overrides chronological Chat instruction placement by merging text-only system/developer messages into one leading system message. The LM Studio preset enables it by default; set it to `false` to disable merging.
 
 
@@ -191,17 +203,17 @@ API key 提供者可以持有字面量 key，或环境引用。OAuth 提供者�
 
 ### 保存提供方时会保留什么
 
-用已有提供方的名称调用 `POST /api/providers`，会用根据请求构建的行替换已存储的行。仪表板的添加/编辑表单无法发送所有字段，因此保存时会保留请求省略的部分已存储字段。其中十一个记录的是某个上游的行为：`preserveReasoningContentModels`, `preserveResponsesReasoningContent`, `requiresReasoningPlaceholderModels`, `foldDeveloperRoleToSystem`, `singleLeadingSystemMessage`, `reasoningWireFormat`, `omitReasoningEffortWithToolsModels`, `promoteAdditionalTools`, `retryOn429`, `transientRetryOn5xx`, `retryOnReset`。
+用已有提供方的名称调用 `POST /api/providers`，会用根据请求构建的行替换已存储的行。仪表板的添加/编辑表单无法发送所有字段，因此保存时会保留请求省略的部分已存储字段。其中十四个记录的是某个上游的行为：`preserveReasoningContentModels`, `preserveResponsesReasoningContent`, `requiresReasoningPlaceholderModels`, `foldDeveloperRoleToSystem`, `singleLeadingSystemMessage`, `reasoningWireFormat`, `omitReasoningEffortWithToolsModels`, `promoteAdditionalTools`, `retryOn429`, `transientRetryOn5xx`, `retryOnReset`, `unsupportedHostedTools`, `unsupportedHostedToolsWithClientTools`, `forwardAdvisorTool`。
 
-| 保存 | 十一项设置 | 已存储的 `apiKeyPool` |
+| 保存 | 十四项设置 | 已存储的 `apiKeyPool` |
 | --- | --- | --- |
 | 目的地相同，字段省略 | 保留已存储的值，包括显式的 `[]` 或 `false` | 保留 |
 | 新目的地，字段省略 | 不保留；可能套用新目的地的注册表默认值 | 不保留 |
 | 请求中发送了该字段 | 请求中的值 | 请求中的值 |
 
-目的地指适配器、base URL（协议与主机名比较时不区分大小写，忽略末尾斜杠），以及请求中指定了时的认证模式。把提供方移到其他目的地时，描述旧上游的十项设置和为旧上游签发的密钥池都不会带过去。保存从不把旧行的其余部分合并进新行。
+目的地指适配器、base URL（协议与主机名比较时不区分大小写，忽略末尾斜杠），以及请求中指定了时的认证模式。把提供方移到其他目的地时，描述旧上游的十四项设置和为旧上游签发的密钥池都不会带过去。保存从不把旧行的其余部分合并进新行。
 
-`PATCH /api/providers?name=<provider>` 只修改它指定的字段，无论目的地如何都保留其他所有已存储字段。它接受全部十项设置，`null` 表示清除。对于两个推理列表，空数组会作为显式退出选项保存，而不会被删除。
+`PATCH /api/providers?name=<provider>` 只修改它指定的字段，无论目的地如何都保留其他所有已存储字段。它接受全部十四项设置，`null` 表示清除。对于两个推理列表，空数组会作为显式退出选项保存，而不会被删除。
 
 ### 响应服务等级的可信度
 
@@ -536,7 +548,9 @@ Vercel AI Gateway 可以在多个底层推理提供者之间路由一个模型�
 才会恢复原始原生名称。外部更改的显示名称仍受现有原生元数据规范化规则约束。
 例如，Astra (`gpt-6-astra`) 仍会将不同于固定原生名称的名称替换为该固定名称。
 显示名称覆盖不会改变模型 ID、元数据（包括能力）、排序、路由组合别名和带账户限定的条目。
-此本地目录覆盖不会重命名 HTTP 模型列表中的条目或虚拟 `*-pro` 条目。
+`GET /api/models` 也会为不带前缀的原生条目提供这些名称，客户端导出和 `ocx opencode` 启动器会使用它们。
+OpenCode 保留现有后缀，例如 `sol (native)`。重新运行 `ocx opencode` 或刷新托管集成后，生成的配置才会更新。
+未设置覆盖时，现有导出名称保持不变。`/v1/models` 和虚拟 `*-pro` 条目保持不变。
 
 预览版 GPT-5.6 回退条目使用相同机制。OpenAI API key 预设会为基础和 Pro id 设定 `1050000` 上下文和 `922000` 最大输入；OpenRouter 会为 `openai/gpt-5.6-sol`、`openai/gpt-5.6-terra` 和 `openai/gpt-5.6-luna` 设定 `1050000` 上下文。原生 Pool/Direct 的窗口遵循[保留 OpenAI 供应商策略](/reference/configuration/providers/#reserved-openai-providers)；同步后的目录会声明 `max`，同时保留 `xhigh` 的独立性。
 

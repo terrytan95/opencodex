@@ -1,4 +1,4 @@
-import { CODEX_INTERNAL_OPENAI_MODELS } from "./codex/control-plane-models";
+import { isBareOpenAiFamilyModel } from "./codex/control-plane-models";
 import type { CodexAccountMode, OcxConfig, OcxProviderConfig } from "./types";
 import { createHash } from "node:crypto";
 import { peekAuthStore } from "./oauth/store";
@@ -14,6 +14,7 @@ import {
 import type { NormalizedComboConfig } from "./combos/types";
 import { hasOwnProvider } from "./config/provider-name";
 import { anthropicInstanceRowShapeMatches } from "./providers/anthropic-instance-id";
+import { isProviderApiKeyPaused } from "./providers/api-key-pause";
 import { reconcileRouterWarningMemos, routedProviderConfig } from "./providers/routed-config";
 import { assertProviderDestinationAllowed } from "./lib/destination-policy";
 import {
@@ -317,18 +318,16 @@ function crossProviderRedirectTarget(config: OcxConfig, providerName: string, va
       );
       return usable ? value : undefined;
     }
+    if (isProviderApiKeyPaused(effective)) return undefined;
     return authMode === "local" || effective.keyOptional === true || Boolean(effective.apiKey?.trim())
+      || (authMode === "key" && effective.adapter === "google" && effective.googleMode === "vertex")
       ? value : undefined;
   } catch {
     return undefined;
   }
 }
 
-/** Exported for the main-account hard-lock fallback: only this family is ever redirected. */
-export function isBareOpenAiFamilyModel(modelId: string): boolean {
-  return !modelId.includes("/")
-    && (/^(?:gpt-|o1-|o3-|o4-)/.test(modelId) || CODEX_INTERNAL_OPENAI_MODELS.has(modelId));
-}
+export { isBareOpenAiFamilyModel } from "./codex/control-plane-models";
 
 function routeResult(
   config: OcxConfig | undefined,
@@ -597,7 +596,7 @@ function routeModelInternal(
       const decoded = decodeRoutedModelIdOrThrow(requestedModel, known);
       const nativeModel = known.includes(decoded)
         ? decoded
-        : resolveModelAlias(config, prov, known, requestedModel)
+        : resolveModelAlias(config, prov, known, requestedModel, provName)
           // Last resort for direct requests while the live roster is cold: display-name keys are
           // operator-declared native ids, consulted only here so they never claim aliases or shadow
           // known or retained ids. Concrete policy/combo/redirect targets (bypassCombos) keep the
@@ -669,7 +668,7 @@ function routeModelInternal(
   const aliasMatches: Array<{ provider: string; model: string; qualified: string }> = [];
   for (const [provName, prov] of activeProviderEntries(config)) {
     const known = knownModelIdsForProvider(provName, prov, config);
-    const native = resolveModelAlias(config, prov, known, modelId);
+    const native = resolveModelAlias(config, prov, known, modelId, provName);
     if (native) aliasMatches.push({
       provider: provName,
       model: native,
