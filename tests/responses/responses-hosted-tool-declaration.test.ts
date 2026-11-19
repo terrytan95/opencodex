@@ -119,6 +119,15 @@ describe("a declared hosted-tool denial reaches the serialized request", () => {
     });
   }
 
+  test("a provider can reject the Codex encrypted output projection while preserving reasoning includes", () => {
+    const raw = { include: ["reasoning.encrypted_content", "output.encrypted_content"] };
+    const provider = gateway({ baseUrl: "http://127.0.0.1:18989/v1", supportsResponsesOutputEncryptedContent: false });
+    expect(build(raw, provider).include).toEqual(["reasoning.encrypted_content"]);
+    expect(build({ include: ["output.encrypted_content"] }, provider)).not.toHaveProperty("include");
+    expect(raw.include).toEqual(["reasoning.encrypted_content", "output.encrypted_content"]);
+    expect(build(raw, gateway({ baseUrl: provider.baseUrl })).include).toEqual(raw.include);
+  });
+
   test("an undeclared gateway still forwards hosted web_search", () => {
     // The declaration is the only thing that changes behaviour here: without it this
     // destination is an unclassified gateway and the hosted tool must pass through, or the

@@ -428,6 +428,8 @@ export interface OcxProviderConfig {
    * clients can resend full input. Explicit input still receives orphan-item repair.
    */
   statelessResponses?: boolean;
+  /** False omits the Codex-only output.encrypted_content include on this Responses provider. */
+  supportsResponsesOutputEncryptedContent?: boolean;
   /**
    * Responses upstream whose parser requires an unambiguous call batch and its matched
    * result batch to remain contiguous. Hook-injected context that splits the batch is

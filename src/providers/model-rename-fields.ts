@@ -26,6 +26,7 @@ export const PROVIDER_MODEL_RENAME_ROLES = {
   chatCompletionsPath: "none",
   commandCodeVersion: "none",
   statelessResponses: "none",
+  supportsResponsesOutputEncryptedContent: "none",
   requiresAdjacentResponsesToolResults: "none",
   requiresPairedResponsesToolResults: "none",
   annotateEmptyToolOutputs: "none",

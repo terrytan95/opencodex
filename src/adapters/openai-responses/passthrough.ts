@@ -368,7 +368,8 @@ export function createResponsesPassthroughAdapter(provider: OcxProviderConfig): 
         const arkKimi = !forward && provider.arkKimiResponsesModels?.includes(parsed.modelId);
         if (arkKimi) outBody = stripArkKimiOrphanCipher(outBody);
         if (isXaiResponsesDestination(provider) || isMetaAiResponsesDestination(url) || isAzureResponses
-          || isKimiCodingResponsesHttpsUrl(url) || arkKimi || isOpenCodeGoResponsesUrl(url)) {
+          || isKimiCodingResponsesHttpsUrl(url) || arkKimi || isOpenCodeGoResponsesUrl(url)
+          || provider.supportsResponsesOutputEncryptedContent === false) {
           outBody = stripUnsupportedOutputInclude(outBody);
         }
         // xAI and explicitly classified compatible gateways reject these OpenAI web_search
