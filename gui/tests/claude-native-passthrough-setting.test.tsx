@@ -8,7 +8,7 @@ import { act } from "react";
 import type { Root } from "react-dom/client";
 import NativePassthroughSetting from "../src/components/provider-workspace/NativePassthroughSetting";
 import { LanguageProvider } from "../src/i18n/provider";
-import { DICTS } from "../src/i18n/shared";
+import { DICTS } from "./helpers/i18n-catalogs";
 
 const domGlobals = ["document", "window", "navigator", "fetch", "IS_REACT_ACT_ENVIRONMENT"] as const;
 let previousDomGlobals: Record<(typeof domGlobals)[number], PropertyDescriptor | undefined>;

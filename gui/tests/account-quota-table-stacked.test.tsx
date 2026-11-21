@@ -9,7 +9,7 @@ import { act } from "react";
 import type { Root } from "react-dom/client";
 import { AccountQuotaTable } from "../src/components/provider-workspace/AccountQuotaTable";
 import { LanguageProvider } from "../src/i18n/provider";
-import { DICTS } from "../src/i18n/shared";
+import { DICTS } from "./helpers/i18n-catalogs";
 
 const en = DICTS.en;
 const HOUR = 3_600_000;

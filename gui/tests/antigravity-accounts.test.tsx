@@ -31,6 +31,7 @@ beforeEach(() => {
       const url = String(input);
       const body = init?.body ? JSON.parse(String(init.body)) : undefined;
       requests.push({ url, method: init?.method ?? "GET", body });
+      if (url === "/pool/api/protocols") return Response.json({ settings: { rollout: { geminiNativeAntigravity: false } } });
       if (url.endsWith("/active")) selected = body.accountId;
       if (url.endsWith("/pause")) paused = body.paused;
       if (init?.method === "PUT") return Response.json({ activeAccountId: selected });
@@ -74,7 +75,9 @@ test("dedicated route loads only Antigravity and preserves selection until an ex
   expect(resolveAppHashChange("antigravity")).toEqual({ page: "antigravity", replaceTo: null });
   await mount();
   expect(host.querySelectorAll(".aqt-group").length).toBe(2);
-  expect(requests.every(request => request.url.includes("provider=google-antigravity"))).toBe(true);
+  const accountRequests = requests.filter(request => request.url !== "/pool/api/protocols");
+  expect(accountRequests.length).toBeGreaterThan(0);
+  expect(accountRequests.every(request => request.url.includes("provider=google-antigravity"))).toBe(true);
   expect(requests.every(request => request.method === "GET")).toBe(true);
   expect(host.querySelector('[title*="g1-pro-tier"]')).toBeTruthy();
   expect(host.textContent).toContain("Gemini");
