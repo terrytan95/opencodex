@@ -1073,6 +1073,8 @@ Protocol v1 (newline-delimited JSON-RPC on stdio).
   system prompt support. The flattened prompt keeps the newest 200,000 characters and adds a `[truncated]` marker
   when it cuts older text. When the CLI lacks separate system prompt support, the system block is prepended to the
   flattened prompt and can be partly or wholly truncated.
+- In the Codex skill catalog, the ACP adapter describes references to the Codex goal command in plain text
+  to avoid triggering Antigravity goal mode. User prompts and skill paths retain their original text.
 - Permission requests are answered `cancelled`, file system and terminal requests from the CLI are not executed, and
   errors carry fixed text: the CLI's stderr and its error messages are never returned.
 - OpenCodex scans answer and reasoning text for supported credential patterns, including values split across ACP frames.

@@ -97,9 +97,17 @@ function fence(label: string, body: string): string {
   return `[${label}]\n${body.replace(/^\[(System|User|Assistant|Tool)\]/gm, " $&")}`;
 }
 
+function disambiguateCodexGoalSkill(text: string): string {
+  // agy can interpret references to Codex's slash command as its own goal mode.
+  return text.replace(/^<skills_instructions>\r?\n[\s\S]*?^<\/skills_instructions>\r?$/gm, block =>
+    block.replace(/^(- \S+?: )([^\r\n]+?)( \(file: [^\r\n]+\)\r?)$/gm,
+      (_, name, description, path) => name + description.replace(/\bCodex \/goal\b/g, "Codex goal-mode") + path),
+  );
+}
+
 /** The system text of a parsed request, or "" when there is none. */
 export function acpSystemText(parsed: OcxParsedRequest): string {
-  return parsed.context.systemPrompt?.filter(line => line.trim().length > 0).join("\n") ?? "";
+  return disambiguateCodexGoalSkill(parsed.context.systemPrompt?.filter(line => line.trim().length > 0).join("\n") ?? "");
 }
 
 /**
@@ -129,6 +137,7 @@ export function buildAcpPrompt(parsed: OcxParsedRequest, includeSystem: boolean)
       if (calls) text = text ? `${text}\n\n${calls}` : calls;
     }
     if (!text.trim()) continue;
+    if (message.role === "developer") text = disambiguateCodexGoalSkill(text);
     const label = message.role === "assistant" ? "Assistant" : message.role === "developer" ? "System" : "User";
     blocks.push(fence(label, text));
   }

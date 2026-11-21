@@ -59,7 +59,10 @@ The shared `src/adapters/coding-agent/turn.ts` calls the synchronous `IncomingMe
   and print a single numeric version at or above the minimum. The verdict binds to the executable’s
   real path, device, inode, size, modification time and change time. The adapter checks this identity
   after workspace setup, re-probes a replacement and launches the verified real path. A cancelled request reaps its uncached probe without recording a verdict. The CLI owns its Google sign-in,
-  so the `antigravity-acp` row is keyless (`authKind: "key"`, `keyOptional`). The init wizard skips the key question
+  so the `antigravity-acp` row is keyless (`authKind: "key"`, `keyOptional`). The ACP prompt builder rewrites
+  Codex goal-command references inside skill descriptions in the generated developer or system catalog.
+  User messages, skill names, and file paths retain their original text.
+  The init wizard skips the key question
   and omits the key field for ACP. The login command prints the host sign-in command, and API-key validation
   refuses ACP before any request. Key-optional LiteLLM still accepts a key or an environment reference. Structural config validation
   (`src/config/schema/agy-acp-references.ts`) shares the static model roster in `src/providers/registry/agy-acp-models.ts`
