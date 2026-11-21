@@ -22,7 +22,6 @@ export type NavGroupId =
   | "models"
   | "providers"
   | "accounts"
-  | "antigravity"
   | "subagents"
   | "usage-logs"
   | "connect"
@@ -65,7 +64,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   { id: "models", tier: "daily", tkey: "nav.models", Icon: IconBoxes, pages: ["models"] },
   // Codex's account pool: which account is serving and how much it has left.
   { id: "accounts", tier: "daily", tkey: "shellV2.navAccounts", Icon: IconCodex, pages: ["codex-set"] },
-  { id: "antigravity", tier: "daily", tkey: "nav.antigravity", Icon: IconBot, pages: ["antigravity"] },
   // Which model a helper agent runs on is changed as often as the main model.
   { id: "subagents", tier: "daily", tkey: "nav.subagents", Icon: IconBot, pages: ["subagents"] },
   { id: "usage-logs", tier: "daily", tkey: "nav.usageLogs", Icon: IconActivity, pages: ["usage", "logs", "storage"] },

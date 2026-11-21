@@ -18,7 +18,7 @@ const raw = await Bun.file(new URL("../src/App.tsx", import.meta.url)).text();
  */
 const src = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
-test("the sidebar is twelve group rows in two tiers, owning every sidebar page once", async () => {
+test("the sidebar is eleven group rows in two tiers, owning every sidebar page once", async () => {
   const { NAV_GROUPS, NAV_TIERS, groupForPage } = await import("../src/nav-groups");
   const { VALID_PAGES } = await import("../src/app-routing");
 
@@ -27,13 +27,12 @@ test("the sidebar is twelve group rows in two tiers, owning every sidebar page o
   expect(NAV_TIERS.map(entry => entry.tier)).toEqual(["daily", "advanced"]);
   // The exact rows, in order. A count alone would pass if a row were swapped for another.
   expect(NAV_GROUPS.map(group => [group.id, group.tier])).toEqual([
-    ["home", "daily"], ["connect", "daily"], ["providers", "daily"], ["models", "daily"], ["accounts", "daily"], ["antigravity", "daily"], ["subagents", "daily"], ["usage-logs", "daily"], ["remote", "daily"],
+    ["home", "daily"], ["connect", "daily"], ["providers", "daily"], ["models", "daily"], ["accounts", "daily"], ["subagents", "daily"], ["usage-logs", "daily"], ["remote", "daily"],
     ["proxy", "advanced"], ["advisor", "advanced"], ["advanced", "advanced"],
   ]);
   expect(Object.fromEntries(NAV_GROUPS.map(group => [group.id, [...group.pages]]))).toEqual({
     // Startup is a Home tab.
     home: ["home", "startup"],
-    antigravity: ["antigravity"],
     models: ["models"],
     accounts: ["codex-set"],
     // Providers sits on its own row under Route.
@@ -51,10 +50,11 @@ test("the sidebar is twelve group rows in two tiers, owning every sidebar page o
   });
   expect(NAV_GROUPS.find(group => group.id === "connect")?.embedded).toEqual(["claude"]);
 
-  // Every routable page belongs to exactly one row; a page in two rows would light both up.
+  // The Antigravity accounts page remains available by direct link.
   const owned = NAV_GROUPS.flatMap(group => [...group.pages, ...(group.embedded ?? [])]);
   expect(new Set(owned).size).toBe(owned.length);
-  expect(new Set(owned)).toEqual(new Set(VALID_PAGES));
+  expect(VALID_PAGES.has("antigravity")).toBe(true);
+  expect(new Set(owned)).toEqual(new Set([...VALID_PAGES].filter(page => page !== "antigravity")));
   expect(groupForPage("setup")?.id).toBe("connect");
   expect(groupForPage("storage")?.id).toBe("usage-logs");
   expect(groupForPage("dashboard")?.id).toBe("proxy");

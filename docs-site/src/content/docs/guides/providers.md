@@ -257,10 +257,10 @@ Cursor, Kiro, Zed Hosted AI and Nous Portal are login-only and have no API-key e
 login-only too: `ocx login google-antigravity` signs in with your Google account over the Cloud Code
 Assist wire, and the `google` preset beside it is the AI Studio Gemini API — a different product
 reached with its own key, not a key mode for the same login.
-The **Antigravity** sidebar entry, directly below **Codex**, opens a dedicated account pool
-at `#antigravity`. It uses the same signed-in accounts as Providers → Google Antigravity →
-Accounts, with account cards, model quota bars, refresh, switching, pause/resume, aliases,
-removal, login and Cockpit import. Opening the page does not switch the selected account.
+Providers → Google Antigravity → Accounts opens the account pool. The direct link
+`#antigravity` shows the same signed-in accounts, with account cards, model quota bars,
+refresh, switching, pause/resume, aliases, removal, login and Cockpit import. Opening the page
+does not switch the selected account.
 
 :::danger[Google can disable Gemini and Antigravity on the Google account]
 The Antigravity login is meant for Google's own Antigravity app. Users of third-party tools have

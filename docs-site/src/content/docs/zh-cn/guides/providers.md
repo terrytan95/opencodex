@@ -596,4 +596,4 @@ opencodex 会以明确的错误拒绝结构化输出请求（`text.format`），
 
 ### Antigravity 账号池入口
 
-左侧菜单的 **Antigravity** 位于 **Codex** 下方，直接打开 `#antigravity` 账号池。它与提供方页面使用同一组已登录账号，支持逐账号额度、刷新、切换、暂停／恢复、别名、删除、登录及 Cockpit 导入。打开页面不会切换当前账号。
+在「提供方 → Google Antigravity → 账号」中管理账号池。直接访问 `#antigravity` 也可查看同一组已登录账号，支持逐账号额度、刷新、切换、暂停／恢复、别名、删除、登录及 Cockpit 导入。打开页面不会切换当前账号。
