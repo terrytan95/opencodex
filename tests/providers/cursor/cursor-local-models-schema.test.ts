@@ -25,6 +25,7 @@ test("public discovery separates reasoning, toggle and real strength controls", 
   const toggle = modelCapabilityFields({ supportsReasoning: true, supportsThinkingToggle: true, supportsReasoningEffort: false, defaultThinkingEnabled: false, reasoningEfforts: ["none", "high"] });
   expect(toggle.capabilities).toMatchObject({ supports_reasoning: true, supports_thinking_toggle: true, supports_reasoning_effort: false, default_thinking_enabled: false });
   expect(toggle.capabilities.reasoning_effort).toBeUndefined();
+  expect(toggle).not.toHaveProperty("supported_reasoning_efforts");
   const both = modelCapabilityFields({ supportsReasoning: true, supportsThinkingToggle: true, supportsReasoningEffort: true, reasoningEfforts: ["low", "high"] });
   expect(both.capabilities.reasoning_effort).toEqual(["low", "high"]);
   expect(modelCapabilityFields({}).capabilities.supports_thinking_toggle).toBeUndefined();
@@ -244,12 +245,15 @@ describe("raw /v1/models list advertises Cursor local-agent capabilities", () =>
       expect(k3!.context_window).toBe(200000);
       expect(k3!.context_length).toBe(200000);
       expect(k3!.max_output_tokens).toBe(64_000);
+      expect(k3!.supported_reasoning_efforts).toEqual(["low", "high", "max"]);
       // Grok Build's discovery fields stay untouched next to the new keys.
       expect(k3!.supports_reasoning_effort).toBe(true);
       expect(k3!.reasoning_effort).toBe("high");
+      expect(k3!.reasoning_efforts).toContainEqual({ value: "high", label: "High Effort", default: true });
 
       const plain = body.data.find(m => m.id === "kimi/kimi-for-coding");
       expect(plain).toBeDefined();
+      expect(plain).not.toHaveProperty("supported_reasoning_efforts");
       expect(plain!.api_types).toEqual(["chat_completions", "responses", "anthropic_messages"]);
       const plainCaps = plain!.capabilities as Record<string, unknown>;
       expect(plainCaps.supports_reasoning).toBe(false);
@@ -260,6 +264,7 @@ describe("raw /v1/models list advertises Cursor local-agent capabilities", () =>
       expect(sol).toBeDefined();
       expect(sol!.api_types).toEqual(["chat_completions", "responses", "anthropic_messages"]);
       const solCaps = sol!.capabilities as Record<string, unknown>;
+      expect(sol!.supported_reasoning_efforts).toEqual(nativeReasoningEfforts("gpt-5.6-sol"));
       expect(solCaps.output_modalities).toEqual(["text"]);
       expect(solCaps.reasoning_effort).toEqual(nativeReasoningEfforts("gpt-5.6-sol"));
       // Native GPT-5.6: 272k default window, 922k opt-in ceiling → Cursor Context selector.

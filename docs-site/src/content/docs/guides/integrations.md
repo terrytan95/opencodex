@@ -1245,6 +1245,7 @@ ocx disconnect antigravity             # or: ocx disconnect agy
 ```
 
 Use `--model` only with `ocx connect antigravity` to set the desktop app's default model.
+The connect commands use [Enterprise Gateway mode](https://docs.cloud.google.com/gemini/enterprise/docs/ai-developer-tools/connect-enterprise-gateway), which replaces Google account sign-in for inference.
 
 Connect records what it replaced. Disconnect puts the original bytes back when the file is unchanged, and
 otherwise reverts only OpenCodex's own entries and keeps your other edits. Antigravity can restore
@@ -1272,3 +1273,17 @@ passthrough** in the Google Antigravity **Accounts** tab. The JSON setting is
 `protocols.rollout.geminiNativeAntigravity`. This opt-in
 applies to `/v1beta` Gemini generation routed to the canonical `google-antigravity` OAuth
 provider. Other routes use the Chat bridge. See [Native Gemini with Antigravity](/reference/proxy-formats/#native-gemini-with-antigravity).
+
+To keep native Google models and OpenCodex models in one picker, use the separate
+[AGY Lab 0.2.0](https://github.com/Fanch-hui/agy-lab/tree/695c97b16606d59363306c61e07d512bbcc3fc13)
+desktop client on a version of Antigravity it supports. Configure the connection in Lab:
+
+1. Under **第三方模型连接** (Third-party model connections), select **API Key** and enter your
+   OpenCodex base URL including `/v1`, for example `http://127.0.0.1:10100/v1`. Use a proxy inference
+   key if your listener requires one, or `opencodex-local` for unauthenticated loopback access.
+2. Fetch models, add the IDs you want, and restart Lab. If you change enabled models in OpenCodex,
+   fetch the list again and update the Lab selections.
+3. Run **测试工具** (Test tools) for each model you plan to use with tools.
+
+Lab sends requests for OpenCodex models through Chat Completions and uses the advertised reasoning
+levels it supports. Native model requests use your Google session.

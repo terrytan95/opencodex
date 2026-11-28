@@ -753,6 +753,7 @@ ocx disconnect antigravity             # or: ocx disconnect agy
 ```
 
 Usa `--model` solo con `ocx connect antigravity` para fijar el modelo predeterminado de la app de escritorio.
+Estos comandos usan el [modo Enterprise Gateway](https://docs.cloud.google.com/gemini/enterprise/docs/ai-developer-tools/connect-enterprise-gateway), que sustituye el inicio de sesión con la cuenta de Google para la inferencia.
 
 Conectar registra lo que reemplazó. Desconectar restaura los bytes originales cuando el archivo no ha
 cambiado y, en caso contrario, revierte solo las entradas propias de OpenCodex y conserva tus otras
@@ -784,3 +785,17 @@ Para conservar el JSON de Gemini, inicia sesión con `ocx login google-antigravi
 aplica a las solicitudes de generación Gemini de `/v1beta` que se enrutan al proveedor OAuth
 canónico `google-antigravity`. Las demás rutas usan el puente de Chat.
 Consulta [Gemini nativo con Antigravity](/es/reference/proxy-formats/#native-gemini-with-antigravity).
+
+Para mantener los modelos nativos de Google y los de OpenCodex en el mismo selector, usa el cliente
+de escritorio independiente [AGY Lab 0.2.0](https://github.com/Fanch-hui/agy-lab/tree/695c97b16606d59363306c61e07d512bbcc3fc13)
+con una versión de Antigravity compatible. Configura la conexión en Lab:
+
+1. En **第三方模型连接** (Conexiones de modelos de terceros), selecciona **API Key** e introduce la URL
+   base de OpenCodex con `/v1`, por ejemplo `http://127.0.0.1:10100/v1`. Usa una clave de inferencia
+   del proxy si el servicio la exige, o `opencodex-local` si admite acceso sin autenticación por loopback.
+2. Carga los modelos, añade los ID que quieras y reinicia Lab. Si cambias los modelos habilitados en
+   OpenCodex, vuelve a cargar la lista y actualiza la selección en Lab.
+3. Ejecuta **测试工具** (Probar herramientas) para cada modelo con el que quieras usar herramientas.
+
+Lab envía las solicitudes de OpenCodex por Chat Completions y usa los niveles de razonamiento
+anunciados que admite. Las solicitudes de modelos nativos usan tu sesión de Google.

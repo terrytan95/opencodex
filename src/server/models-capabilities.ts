@@ -16,6 +16,7 @@ import type { CursorEffortTable } from "../integrations/cursor-effort-table";
  * mirrored directly on each model row for external client discovery (e.g. pi-ai, DSH,
  * LibreChat) that inspects flat properties rather than Cursor's nested `capabilities.*` shape.
  * A row that gains a nested capacity value must gain the top-level mirror in the same change.
+ * AGY Lab reads `supported_reasoning_efforts` as strings alongside the existing Grok object ladder.
  */
 
 // Grok Build discovers models through this endpoint, and its model picker only
@@ -181,6 +182,7 @@ export interface ModelCapabilityFields {
    * Mirrored top-level max output token limit for external/legacy client discovery.
    */
   max_output_tokens?: number;
+  supported_reasoning_efforts?: string[];
   /**
    * Cursor reads the long-context threshold from `pricing.overrides[].min_prompt_tokens`. That
    * key sits outside its validated capability schema, so it is the one place a threshold can
@@ -237,6 +239,7 @@ export function modelCapabilityFields(input: ModelCapabilityInput): ModelCapabil
       ? { context_window: effectiveContextLength, context_length: effectiveContextLength }
       : {}),
     ...(maxOutputTokens !== undefined ? { max_output_tokens: maxOutputTokens } : {}),
+    ...(efforts.length > 0 ? { supported_reasoning_efforts: efforts } : {}),
     ...(hasLongTier ? { pricing: { overrides: [{ min_prompt_tokens: contextLength }] } } : {}),
   };
 }
